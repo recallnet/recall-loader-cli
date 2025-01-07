@@ -1,0 +1,38 @@
+{
+    "privateKey": "USED_FOR_ALL_TESTS_BY_DEFAULT",
+    "network": "devnet",
+    "tests": [
+        {
+            "privateKey": null,
+            "buyCredit": 20,
+            "test": {
+                "upload": {
+                    "bucket": null,
+                    "blobCount": 500,
+                    "prefix": "foo",
+                    "blobSizeMb": 1.0,
+                    "overwrite": true
+                },
+                "broadcastMode": "commit",
+                "download": null,
+                "delete": true
+            }
+        },
+        {
+            "privateKey": "OVERRIDES_THE_ROOT_PRIVATE_KEY",
+            "buyCredit": 10,
+            "test": {
+                "upload": {
+                    "bucket": null,
+                    "blobCount": 2,
+                    "prefix": "bar/bar",
+                    "blobSizeMb": 2000.0,
+                    "overwrite": true
+                },
+                "broadcastMode": "async",
+                "download": true,
+                "delete": true
+            }
+        }
+    ]
+}

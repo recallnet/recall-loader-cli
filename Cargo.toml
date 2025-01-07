@@ -1,0 +1,33 @@
+[package]
+name = "hoku-loader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+async-stream = "0.3.5"
+async-tempfile = "0.6.0"
+clap = { version = "4.3.0", features = [
+    "derive",
+    "std",
+    "env",
+    "help",
+    "usage",
+    "error-context",
+], default-features = false }
+fendermint_crypto = { path = "../ipc/fendermint/crypto" }
+hex = "0.4"
+hoku_sdk = { git = "ssh://git@github.com/hokunet/rust-hoku.git", rev = "965b37569829f64b09954f0c868879dd2a705743" }
+hoku_provider = { git = "ssh://git@github.com/hokunet/rust-hoku.git", rev = "965b37569829f64b09954f0c868879dd2a705743" }
+hoku_signer = { git = "ssh://git@github.com/hokunet/rust-hoku.git", rev = "965b37569829f64b09954f0c868879dd2a705743" }
+rand = "0.8"
+serde = "1"
+serde_json = "1"
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# [patch."ssh://git@github.com/hokunet/rust-hoku.git"]
+# hoku_sdk = {path = "../rust-hoku/sdk"}
+# hoku_provider = {path = "../rust-hoku/provider"}
+# hoku_signer = {path = "../rust-hoku/signer"}
