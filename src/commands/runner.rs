@@ -224,6 +224,7 @@ pub struct TestResult {
 #[derive(Debug)]
 pub struct Timing {
     bucket: Address,
+    #[allow(dead_code)]
     key: String,
     /// in bytes
     size: usize,

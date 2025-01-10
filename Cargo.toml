@@ -15,7 +15,6 @@ clap = { version = "4.3.0", features = [
     "usage",
     "error-context",
 ], default-features = false }
-fendermint_crypto = { path = "../ipc/fendermint/crypto" }
 hex = "0.4"
 hoku_sdk = { git = "ssh://git@github.com/hokunet/rust-hoku.git", rev = "965b37569829f64b09954f0c868879dd2a705743" }
 hoku_provider = { git = "ssh://git@github.com/hokunet/rust-hoku.git", rev = "965b37569829f64b09954f0c868879dd2a705743" }
