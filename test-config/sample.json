@@ -5,6 +5,7 @@
         {
             "privateKey": null,
             "buyCredit": 20,
+            "target": "sdk",
             "test": {
                 "upload": {
                     "bucket": null,
@@ -21,6 +22,7 @@
         {
             "privateKey": "OVERRIDES_THE_ROOT_PRIVATE_KEY",
             "buyCredit": 10,
+            "target": "sdk",
             "test": {
                 "upload": {
                     "bucket": null,

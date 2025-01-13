@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant},
@@ -7,12 +8,11 @@ use anyhow::{anyhow, bail, Context as _, Result};
 use hoku_provider::{
     fvm_shared::{address::Address, econ::TokenAmount},
     json_rpc::JsonRpcProvider,
-    tx::{TxReceipt, TxStatus},
 };
 use hoku_sdk::{
     credits::{BuyOptions, Credits},
     machine::{
-        bucket::{AddOptions, Bucket, DeleteOptions, GetOptions, Object},
+        bucket::{AddOptions, Bucket, DeleteOptions, GetOptions},
         Machine,
     },
 };
@@ -21,11 +21,13 @@ use rand::{thread_rng, Rng as _};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tracing::{debug, error, info, trace, warn};
 
+use crate::config::{Target as ConfigTarget, Test, TestConfig};
 use crate::parse_private_key;
-
-use crate::config::{Test, TestConfig};
+use crate::targets::sdk::SdkTarget;
+use crate::targets::Target;
 
 pub struct TestRunner {
+    target: Arc<dyn Target>,
     provider: JsonRpcProvider,
     wallet: Wallet,
     test: Test,
@@ -33,8 +35,9 @@ pub struct TestRunner {
 }
 
 impl TestRunner {
-    pub async fn upload_test(self) -> Result<TestResult> {
+    pub async fn execute(self) -> Result<TestResult> {
         let TestRunner {
+            target,
             provider,
             mut wallet,
             test,
@@ -47,50 +50,42 @@ impl TestRunner {
             hoku_provider::tx::BroadcastMode::Commit => 10,
             _v => 100,
         };
-        let machine = if let Some(bucket) = upload_config.bucket {
-            let machine = Bucket::attach(bucket)
+        let bucket = if let Some(bucket) = upload_config.bucket {
+            let bucket = Bucket::attach(bucket)
                 .await
                 .context("failed to attach bucket")?;
-            info!(%id, "using existing machine as bucket: {}", machine.address());
-            machine
+            info!(%id, "using existing machine as bucket: {}", bucket.address());
+            bucket
         } else {
-            let (machine, tx) = Bucket::new(
-                &provider,
-                &mut wallet,
-                None,
-                HashMap::new(),
-                Default::default(),
-            )
-            .await?;
+            let bucket = target.clone().create_bucket().await?;
             info!(
                 %id,
                 addr=?wallet.address(),
-                "Created new bucket {} in transaction hash: 0x{}",
-                machine.address(),
-                tx.hash
+                "created new bucket {}",
+                bucket.address(),
             );
-            machine
+            bucket
         };
         let mut results = HashMap::with_capacity(upload_config.blob_count as usize);
         let mut tx_results = Vec::with_capacity(upload_config.blob_count as usize);
         for i in 0..upload_config.blob_count {
             let key = test.get_key_with_prefix(&i.to_string());
             match upload_blob(
-                &provider,
-                &mut wallet,
-                &machine,
+                target.clone(),
+                &bucket,
                 &key,
                 upload_config.blob_size_bytes(),
                 test.add_opts(),
             )
             .await
             {
-                Ok((time, tx)) => {
-                    tx_results.push((key.clone(), tx));
+                Ok(time) => {
+                    info!("Successfully added object {}", key);
+                    tx_results.push(key.clone());
                     results.insert(
                         key.clone(),
                         Timing {
-                            bucket: machine.address(),
+                            bucket: bucket.address(),
                             size: upload_config.blob_size_bytes(),
                             key,
                             upload_time: Some(time),
@@ -116,12 +111,12 @@ impl TestRunner {
 
         if download_config
             .as_ref()
-            .map_or(false, |c| c.should_download())
+            .is_some_and(|c| c.should_download())
         {
             let opts = download_config.expect("download config exists").get_opts();
-            loop_until_blob_found(tx_results, &provider, &machine, wait_retries).await;
+            loop_until_blob_found(tx_results, target.clone(), &bucket, wait_retries).await;
             for (key, res) in results.iter_mut() {
-                match download_blob(&provider, &machine, key, opts.clone(), true).await {
+                match download_blob(target.clone(), &bucket, key, opts.clone(), true).await {
                     Ok(v) => {
                         res.download_time = Some(v);
                     }
@@ -138,9 +133,7 @@ impl TestRunner {
 
         if let Some(opts) = delete_opts {
             for (key, res) in results.iter_mut() {
-                if let Ok(time) =
-                    delete_blob(key, &provider, &mut wallet, &machine, opts.clone()).await
-                {
+                if let Ok(time) = delete_blob(key, target.clone(), &bucket, opts.clone()).await {
                     res.delete_time = Some(time);
                 }
             }
@@ -158,7 +151,7 @@ impl TestRunner {
         let obj_api = network_cfg.object_api_url;
         info!("using network '{network}' and object api: {obj_api}");
 
-        let mut results = Vec::with_capacity(config.tests.len());
+        let mut results: Vec<TestRunner> = Vec::with_capacity(config.tests.len());
         let provider = JsonRpcProvider::new_http(network_cfg.rpc_url, None, Some(obj_api))
             .context("failed to setup json provider")?;
         // reuse wallets because we can't have multiple due to msg/actor sequence numbers getting out of sync
@@ -204,8 +197,17 @@ impl TestRunner {
                 info!(eth_addr=?key.eth_addr, f_addr=?addr, "bought credits {credits} in tx {}", tx.hash);
             }
 
+            let target = match test.target {
+                ConfigTarget::Sdk => Arc::new(SdkTarget {
+                    provider: provider.clone(),
+                    wallet: wallet.clone(),
+                }),
+                ConfigTarget::S3 => unimplemented!(),
+            };
+
             results.push(TestRunner {
                 provider: provider.clone(),
+                target,
                 wallet,
                 test: test.test,
                 id: format!("{i}-{}", key.eth_addr),
@@ -375,16 +377,15 @@ impl TestResult {
 
 pub(crate) async fn delete_blob(
     key: &str,
-    provider: &JsonRpcProvider,
-    wallet: &mut Wallet,
-    machine: &Bucket,
+    target: Arc<dyn Target>,
+    bucket: &Bucket,
     opts: DeleteOptions,
 ) -> Result<Duration> {
     let delete = Instant::now();
-    match machine.delete(provider, wallet, key, opts).await {
-        Ok(tx) => {
+    match target.delete_object(bucket, key, opts.broadcast_mode).await {
+        Ok(_) => {
             let delete = delete.elapsed();
-            trace!(key, time=?delete, "deleted in tx 0x{}", tx.hash);
+            trace!(key, time=?delete, "deleted");
             Ok(delete)
         }
         Err(e) => {
@@ -395,8 +396,8 @@ pub(crate) async fn delete_blob(
 }
 
 async fn loop_until_blob_found(
-    tx_results: Vec<(String, TxReceipt<Object>)>,
-    provider: &JsonRpcProvider,
+    tx_results: Vec<String>,
+    target: Arc<dyn Target>,
     machine: &Bucket,
     mut retries: u32,
 ) {
@@ -404,34 +405,13 @@ async fn loop_until_blob_found(
         "waiting for network to resolve objects in bucket {}...",
         machine.address()
     );
-    let last_uploaded = tx_results
-        .last()
-        .cloned()
-        .expect("tx results can not be empty");
-
-    let not_committed = tx_results
-        .into_iter()
-        .filter(|(_, tx)| !matches!(tx.status, TxStatus::Committed))
-        .collect::<Vec<_>>();
-
-    // would be nice to update the SDK to check tx status. for now just a hack to try a few
-    let to_try = if not_committed.is_empty() {
-        // all committed so will succeed
-        vec![last_uploaded]
-    } else {
-        // often start failing and we wait for a really long time so we'll do the first and one from the middle
-        vec![
-            not_committed[0].clone(),
-            not_committed[not_committed.len() / 2].clone(),
-        ]
-    };
 
     let start = Instant::now();
 
-    for (i, (key, _tx)) in to_try.iter().enumerate() {
+    for (i, key) in tx_results.iter().enumerate() {
         while retries > 0 {
             if let Ok(time) = download_blob(
-                provider,
+                target.clone(),
                 machine,
                 key,
                 GetOptions {
@@ -446,7 +426,7 @@ async fn loop_until_blob_found(
                 info!(
                     request_duration=?time,
                     "able to download/resolve object {}/{} in bucket {} (took {:?}).",
-                    i+1, to_try.len(), machine.address(), time_to_finish
+                    i+1, tx_results.len(), machine.address(), time_to_finish
                 );
                 break;
             }
@@ -461,8 +441,8 @@ async fn loop_until_blob_found(
 }
 
 async fn download_blob(
-    provider: &JsonRpcProvider,
-    machine: &Bucket,
+    target: Arc<dyn Target>,
+    bucket: &Bucket,
     key: &str,
     opts: GetOptions,
     log_errors: bool,
@@ -474,9 +454,12 @@ async fn download_blob(
 
     let open_file = obj_file.open_rw().await.unwrap();
     let now = Instant::now();
-    let maybe_err = machine.get(provider, key, open_file, opts).await;
+    let result = target
+        .get_object(bucket, key, Box::new(open_file), opts.range)
+        .await;
+
     let download = now.elapsed();
-    match maybe_err {
+    match result {
         Ok(_) => {
             // Read the first 10 bytes of your downloaded 100 bytes
             let mut contents = vec![0; 10];
@@ -496,36 +479,32 @@ async fn download_blob(
 }
 
 async fn upload_blob(
-    provider: &JsonRpcProvider,
-    wallet: &mut Wallet,
-    machine: &Bucket,
+    target: Arc<dyn Target>,
+    bucket: &Bucket,
     key: &str,
     size: usize,
-    mut opts: AddOptions,
-) -> Result<(Duration, TxReceipt<Object>)> {
-    let (file_path, size) = temp_file(size).await?;
-    let bucket = machine.address();
+    opts: AddOptions,
+) -> Result<Duration> {
+    let (temp_file, size) = temp_file(size).await?;
 
     let mut metadata = HashMap::new();
     metadata.insert("upload bench test".to_string(), key.to_string());
-    opts.metadata = metadata;
-
     let start = Instant::now();
-    let tx = machine
-        .add_from_path(provider, wallet, key, file_path.file_path(), opts)
+    target
+        .add_object(bucket, key, temp_file.file_path(), metadata, opts.overwrite)
         .await?;
 
     let time = start.elapsed();
+    let address = bucket.address();
     trace!(
-        %bucket,
+        %address,
         key=%key,
         bytes=%size,
-        "uploaded blob in {} ms in tx 0x{}",
+        "uploaded blob in {} ms",
         time.as_millis(),
-        tx.hash,
     );
 
-    Ok((time, tx))
+    Ok(time)
 }
 
 async fn temp_file(size: usize) -> Result<(async_tempfile::TempFile, usize)> {

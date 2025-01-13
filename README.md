@@ -85,6 +85,7 @@ fendermint genesis --genesis-file test-network/genesis.json add-account --public
             // specify a key to use for this test
             "privateKey": null,
             "buyCredit": 10,
+            "target": "sdk",
             "test": {
                 "upload": {
                     // create a new bucket by default
@@ -105,6 +106,7 @@ fendermint genesis --genesis-file test-network/genesis.json add-account --public
         {
             "privateKey": "OVERRIDES_THE_ROOT_PRIVATE_KEY",
             "buyCredit": 10,
+            "target": "sdk",
             "test": {
                 "upload": {
                     "bucket": null,

@@ -3,7 +3,6 @@ use hoku_sdk::network::Network;
 use tracing::info;
 
 use super::{list_bucket_items, setup_provider_wallet_bucket, QueryOpts};
-
 use crate::parse_private_key;
 
 pub async fn query(opts: QueryOpts) -> anyhow::Result<()> {
