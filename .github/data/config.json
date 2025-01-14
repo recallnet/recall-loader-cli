@@ -4,6 +4,7 @@
   "tests": [
     {
       "privateKey": null,
+      "requestFunds" : null,
       "buyCredit": 10,
       "target": "sdk",
       "test": {
@@ -11,7 +12,7 @@
           "bucket": null,
           "blobCount": 10,
           "prefix": "bar",
-          "blobSizeMb": 1,
+          "blobSize": 100,
           "overwrite": true
         },
         "download": false,
