@@ -12,7 +12,12 @@ pub mod sdk;
 #[async_trait]
 pub trait Target: Send + Sync {
     async fn create_bucket(&self) -> Result<Bucket>;
-    async fn list_objects(&self);
+    async fn list_objects(
+        &self,
+        bucket: &Bucket,
+        prefix: &str,
+        start_key: Option<Vec<u8>>,
+    ) -> Result<(Vec<String>, Option<Vec<u8>>)>;
     async fn add_object(
         &self,
         bucket: &Bucket,

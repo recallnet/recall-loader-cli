@@ -8,6 +8,7 @@ use hoku_sdk::{
 use tracing::{error, info};
 
 use super::{list_bucket_items, setup_provider_wallet_bucket, CleanupOpts};
+use crate::config::Target as ConfigTarget;
 use crate::targets::sdk::SdkTarget;
 use crate::{commands::runner::delete_blob, parse_private_key};
 
@@ -20,7 +21,15 @@ pub async fn cleanup(opts: CleanupOpts) -> anyhow::Result<()> {
         .await
         .context("failed to setup")?;
 
-    let (data, durations) = list_bucket_items(&provider, &machine, prefix.clone())
+    let target = match opts.target {
+        ConfigTarget::Sdk => Arc::new(SdkTarget {
+            provider: provider.clone(),
+            wallet: signer.clone(),
+        }),
+        ConfigTarget::S3 => unimplemented!(),
+    };
+
+    let (data, durations) = list_bucket_items(target.clone(), &machine, &prefix)
         .await
         .context("failed to query bucket")?;
 
@@ -36,11 +45,6 @@ pub async fn cleanup(opts: CleanupOpts) -> anyhow::Result<()> {
         error!("found no data in bucket {address} with {prefix}");
         bail!("found no data to delete in bucket {address} with {prefix}");
     }
-
-    let target = Arc::new(SdkTarget {
-        provider,
-        wallet: signer,
-    });
 
     for key in data {
         match delete_blob(&key, target.clone(), &machine, DeleteOptions::default()).await {

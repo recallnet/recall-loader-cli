@@ -5,7 +5,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use hoku_provider::json_rpc::JsonRpcProvider;
 use hoku_provider::tx::BroadcastMode;
-use hoku_sdk::machine::bucket::{AddOptions, Bucket, DeleteOptions, GetOptions};
+use hoku_sdk::machine::bucket::{AddOptions, Bucket, DeleteOptions, GetOptions, QueryOptions};
 use hoku_sdk::machine::Machine;
 use hoku_signer::Wallet;
 use tokio::io::AsyncWrite;
@@ -32,8 +32,27 @@ impl Target for SdkTarget {
         Ok(machine)
     }
 
-    async fn list_objects(&self) {
-        todo!()
+    async fn list_objects(
+        &self,
+        bucket: &Bucket,
+        prefix: &str,
+        start_key: Option<Vec<u8>>,
+    ) -> Result<(Vec<String>, Option<Vec<u8>>)> {
+        let options = QueryOptions {
+            prefix: prefix.to_string(),
+            start_key,
+            ..Default::default()
+        };
+
+        let result = bucket.query(&self.provider, options).await?;
+        let mut results = Vec::new();
+
+        for (key_bytes, _object) in result.objects {
+            let key = String::from_utf8_lossy(&key_bytes).to_string();
+            results.push(key);
+        }
+
+        Ok((results, result.next_key.clone()))
     }
 
     async fn add_object(
