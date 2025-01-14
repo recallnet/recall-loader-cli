@@ -26,3 +26,4 @@ Cargo.lock
 test-config/*
 !test-config/
 !test-config/sample.json
+docker/ssh/id_ed25519
