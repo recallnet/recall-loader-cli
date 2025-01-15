@@ -1,0 +1,22 @@
+{
+  "privateKey": "499f267c2bef4bafe184a205ced03ba30254d2015be4d60bf96ae04a3d3c58b8",
+  "network": "testnet",
+  "tests": [
+    {
+      "privateKey": null,
+      "buyCredit": 10,
+      "target": "sdk",
+      "test": {
+        "upload": {
+          "bucket": null,
+          "blobCount": 10,
+          "prefix": "bar",
+          "blobSizeMb": 1,
+          "overwrite": true
+        },
+        "download": false,
+        "delete": false
+      }
+    }
+  ]
+}
