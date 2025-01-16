@@ -17,5 +17,8 @@ RUN --mount=type=ssh cargo build
 FROM alpine
 
 COPY --from=builder /app/target/debug/hoku-loader /app/hoku-loader
+COPY --from=builder /app/.github/data/config.json /app/config.json
 
-ENTRYPOINT ["/app/hoku-loader"]
+ENV NO_COLOR=1
+
+ENTRYPOINT ["/app/hoku-loader", "run-test", "--path", "/app/config.json"]

@@ -8,7 +8,9 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     env:
-      IMAGE_NAME: hoku-loader
+      DOCKER_IMAGE_NAME: us-central1-docker.pkg.dev/ceramic-3box-apps/registry/hoku-loader-cli
+      VM_ZONE: us-central1-a
+      INSTANCE_TEMPLATE: https://www.googleapis.com/compute/v1/projects/ceramic-3box-apps/regions/us-central1/instanceTemplates/hoku-loader-template
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -32,6 +34,7 @@ jobs:
         run: |
           # Get the short commit hash (first 7 characters of GITHUB_SHA).
           COMMIT_HASH=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_OUTPUT
           # Format the version string as sha-[short-commit-hash].
           VERSION="sha-$COMMIT_HASH"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
@@ -41,5 +44,7 @@ jobs:
           ssh: default=${{ env.SSH_AUTH_SOCK }}
           context: .
           push: true
-          tags: us-central1-docker.pkg.dev/ceramic-3box-apps/registry/hoku-loader-cli:latest, us-central1-docker.pkg.dev/ceramic-3box-apps/registry/hoku-loader-cli:${{ steps.prep.outputs.VERSION }}
+          tags: ${{env.DOCKER_IMAGE_NAME}}:latest, ${{env.DOCKER_IMAGE_NAME}}:${{ steps.prep.outputs.VERSION }}
           labels: ${{ steps.meta.outputs.labels }}
+      - name: Start VM
+        run: gcloud compute instances create hoku-loader-${{steps.prep.outputs.COMMIT_HASH}} --zone ${{env.VM_ZONE}} --source-instance-template ${{env.INSTANCE_TEMPLATE}}
