@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::{bail, Context as _};
 use hoku_sdk::{
     machine::{bucket::DeleteOptions, Machine},
@@ -5,20 +7,29 @@ use hoku_sdk::{
 };
 use tracing::{error, info};
 
-use crate::{commands::runner::delete_blob, parse_private_key};
-
 use super::{list_bucket_items, setup_provider_wallet_bucket, CleanupOpts};
+use crate::config::Target as ConfigTarget;
+use crate::targets::sdk::SdkTarget;
+use crate::{commands::runner::delete_blob, parse_private_key};
 
 pub async fn cleanup(opts: CleanupOpts) -> anyhow::Result<()> {
     let key = parse_private_key(&opts.key)?;
     let prefix = opts.prefix.clone();
     let network = opts.network.unwrap_or(Network::Devnet);
     let bucket = opts.bucket;
-    let (provider, mut signer, machine) = setup_provider_wallet_bucket(key, network, bucket)
+    let (provider, signer, machine) = setup_provider_wallet_bucket(key, network, bucket)
         .await
         .context("failed to setup")?;
 
-    let (data, durations) = list_bucket_items(&provider, &machine, prefix.clone())
+    let target = match opts.target {
+        ConfigTarget::Sdk => Arc::new(SdkTarget {
+            provider: provider.clone(),
+            wallet: signer.clone(),
+        }),
+        ConfigTarget::S3 => unimplemented!(),
+    };
+
+    let (data, durations) = list_bucket_items(target.clone(), &machine, &prefix)
         .await
         .context("failed to query bucket")?;
 
@@ -34,16 +45,9 @@ pub async fn cleanup(opts: CleanupOpts) -> anyhow::Result<()> {
         error!("found no data in bucket {address} with {prefix}");
         bail!("found no data to delete in bucket {address} with {prefix}");
     }
+
     for key in data {
-        match delete_blob(
-            &key,
-            &provider,
-            &mut signer,
-            &machine,
-            DeleteOptions::default(),
-        )
-        .await
-        {
+        match delete_blob(&key, target.clone(), &machine, DeleteOptions::default()).await {
             Ok(time) => {
                 info!("deleted blob with {key} in {:?}", time);
             }

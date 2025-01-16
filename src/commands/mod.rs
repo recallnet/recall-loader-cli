@@ -5,24 +5,20 @@ mod runner;
 pub use delete::cleanup;
 pub use query::query;
 
-use std::{
-    path::PathBuf,
-    time::{Duration, Instant},
-};
-
 use anyhow::Result;
 use clap::Args;
 use hoku_provider::{fvm_shared::address::Address, json_rpc::JsonRpcProvider};
-use hoku_sdk::{machine::bucket::QueryOptions, network::Network};
-use runner::TestRunner;
-use tokio::task::JoinSet;
-
-use crate::config::{self, Broadcast, DownloadTest, TestConfig, TestRunConfig, UploadTest};
-
 use hoku_sdk::machine::{bucket::Bucket, Machine};
+use hoku_sdk::network::Network;
 use hoku_signer::{AccountKind, Signer as _, Wallet};
-use tracing::{debug, info};
+use runner::TestRunner;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::task::JoinSet;
+use tracing::{debug, error, info};
 
+use crate::config::{self, Broadcast, DownloadTest, Target, TestConfig, TestRunConfig, UploadTest};
 use crate::KeyData;
 
 #[derive(Args, Debug, Clone)]
@@ -46,6 +42,9 @@ pub struct CleanupOpts {
     /// The bucket machine address (fvm address string)
     #[arg(short = 'b', long, value_parser = hoku_provider::util::parse_address)]
     pub bucket: Address,
+    /// If the test targets the SDK or S3 client.
+    #[arg(long, default_value = "sdk")]
+    pub target: Target,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -64,6 +63,9 @@ pub struct QueryOpts {
     /// The bucket machine address (fvm address string)
     #[arg(short = 'b', long, value_parser = hoku_provider::util::parse_address)]
     pub bucket: Address,
+    /// If the test targets the SDK or S3 client.
+    #[arg(long, default_value = "sdk")]
+    pub target: Target,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -84,6 +86,9 @@ pub struct BasicTestOpts {
     /// The count of credits to buy before starting (defaults to not buying any)
     #[arg(long)]
     pub buy_credits: Option<u32>,
+    /// If the test targets the SDK or S3 client.
+    #[arg(long, default_value = "sdk")]
+    pub target: Target,
     /// whether blobs should be deleted afterward
     #[arg(long, default_value = "false")]
     pub delete: bool,
@@ -108,6 +113,7 @@ impl From<BasicTestOpts> for TestConfig {
             tests: vec![TestRunConfig {
                 private_key: None,
                 buy_credit: opts.buy_credits,
+                target: opts.target,
                 test: config::Test {
                     upload: UploadTest {
                         bucket: opts.bucket,
@@ -132,14 +138,14 @@ pub async fn run(config: TestConfig) -> Result<()> {
     for (i, test) in tests.into_iter().enumerate() {
         let tx = tx.clone();
         tasks.spawn(async move {
-            match test.upload_test().await {
+            match test.execute().await {
                 Ok(res) => {
                     tx.send((i, res))
                         .await
                         .expect("should be able to send result");
                 }
                 Err(e) => {
-                    tracing::error!(error=?e, "Failed to run test");
+                    error!(error=?e, "Failed to run test");
                 }
             }
         });
@@ -147,7 +153,7 @@ pub async fn run(config: TestConfig) -> Result<()> {
     drop(tx);
     tasks.join_all().await;
     while let Some((i, res)) = rx.recv().await {
-        tracing::info!("got results for test index: {i}");
+        info!("got results for test index: {i}");
         res.display_stats();
     }
     Ok(())
@@ -180,43 +186,25 @@ pub(crate) async fn setup_provider_wallet_bucket(
 }
 
 pub(crate) async fn list_bucket_items(
-    provider: &JsonRpcProvider,
-    machine: &Bucket,
-    prefix: String,
-) -> anyhow::Result<(Vec<String>, Vec<Duration>)> {
-    let options = QueryOptions {
-        prefix: prefix.clone(),
-        ..Default::default()
-    };
-
+    target: Arc<dyn crate::targets::Target>,
+    bucket: &Bucket,
+    prefix: &str,
+) -> Result<(Vec<String>, Vec<Duration>)> {
     let mut query_durations = Vec::new();
-    let start = Instant::now();
-    let mut list = machine.query(provider, options).await?;
-    query_durations.push(start.elapsed());
-    debug!(?list, "queried objects");
-
     let mut results = Vec::new();
 
-    for (key_bytes, object) in list.objects {
-        let key = String::from_utf8_lossy(&key_bytes).to_string();
-        debug!("Query result for key {}: {}", key, object.hash);
-        results.push(key);
-    }
-    while let Some(key) = list.next_key {
-        let options = QueryOptions {
-            prefix: prefix.clone(),
-            start_key: Some(key),
-            ..Default::default()
-        };
+    let start = Instant::now();
+    let (mut list, mut next_key) = target.list_objects(bucket, prefix, None).await?;
+    query_durations.push(start.elapsed());
+    debug!(?list, "queried objects");
+    results.extend(list);
+
+    while let Some(start_key) = next_key {
         let start = Instant::now();
-        list = machine.query(provider, options).await?;
+        (list, next_key) = target.list_objects(bucket, prefix, Some(start_key)).await?;
         query_durations.push(start.elapsed());
 
-        for (key_bytes, object) in list.objects {
-            let key = String::from_utf8_lossy(&key_bytes).to_string();
-            debug!("Query result for key {}: {}", key, object.hash);
-            results.push(key);
-        }
+        results.extend(list);
     }
     Ok((results, query_durations))
 }

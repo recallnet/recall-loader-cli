@@ -19,6 +19,7 @@ pub struct TestConfig {
 pub struct TestRunConfig {
     pub private_key: Option<String>,
     pub buy_credit: Option<u32>,
+    pub target: Target,
     pub test: Test,
 }
 
@@ -100,6 +101,14 @@ pub enum Broadcast {
     /// Wait for the delivery results before returning from broadcast.
     #[default]
     Commit,
+}
+
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Target {
+    #[default]
+    Sdk,
+    S3,
 }
 
 impl From<Broadcast> for BroadcastMode {

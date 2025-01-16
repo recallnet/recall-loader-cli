@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0, MIT
 pub mod commands;
 pub mod config;
+pub mod targets;
 
 use clap::{command, Parser, Subcommand};
 use commands::{BasicTestOpts, CleanupOpts, QueryOpts, RunTestOpts};
