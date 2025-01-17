@@ -1,23 +1,19 @@
 {
-  "privateKey": "499f267c2bef4bafe184a205ced03ba30254d2015be4d60bf96ae04a3d3c58b8",
+  "funderPrivateKey" : "01019316fb69a16e73bd51de96757d750743b2f44ebc3573116502775d01c37a",
   "network": "testnet",
-  "tests": [
-    {
-      "privateKey": null,
-      "requestFunds" : null,
-      "buyCredit": 10,
-      "target": "sdk",
-      "test": {
-        "upload": {
-          "bucket": null,
-          "blobCount": 10,
-          "prefix": "bar",
-          "blobSize": 100,
-          "overwrite": true
-        },
-        "download": false,
-        "delete": false
-      }
-    }
-  ]
+  "test": {
+    "numAccounts": 5,
+    "requestFunds" : 11,
+    "buyCredit": 10,
+    "target": "sdk",
+    "upload": {
+      "bucket": null,
+      "blobCount": 1000,
+      "prefix": "bar",
+      "blobSize": 102400,
+      "overwrite": true
+    },
+    "download": true,
+    "delete": true
+  }
 }

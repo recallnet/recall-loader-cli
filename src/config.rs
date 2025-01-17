@@ -1,32 +1,21 @@
 use hoku_provider::{fvm_shared::address::Address, tx::BroadcastMode};
-use hoku_sdk::{
-    machine::bucket::{AddOptions, DeleteOptions, GetOptions},
-    network::Network,
-};
+use hoku_sdk::{machine::bucket::GetOptions, network::Network};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestConfig {
     pub funder_private_key: String,
-    pub private_key: Option<String>,
     pub network: Network,
-    pub tests: Vec<TestRunConfig>,
+    pub test: TestRunConfig,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestRunConfig {
-    pub private_key: Option<String>,
+    pub num_accounts: i32,
     pub request_funds: Option<u32>,
     pub buy_credit: Option<u32>,
     pub target: Target,
-    pub test: Test,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type")]
-pub struct Test {
     pub upload: UploadTest,
     /// Whether to download the full object or use a range query.
     /// Only public for cli to set, should use getter
@@ -36,31 +25,6 @@ pub struct Test {
     /// TODO: shared for now, could be per tx type in the future if it's interesting
     #[serde(default)]
     pub broadcast_mode: Broadcast,
-}
-
-impl Test {
-    pub fn delete_opts(&self) -> Option<DeleteOptions> {
-        if self.delete {
-            Some(DeleteOptions {
-                broadcast_mode: self.broadcast_mode.into(),
-                ..Default::default()
-            })
-        } else {
-            None
-        }
-    }
-
-    pub fn add_opts(&self) -> AddOptions {
-        AddOptions {
-            overwrite: self.upload.overwrite,
-            broadcast_mode: self.broadcast_mode.into(),
-            ..Default::default()
-        }
-    }
-
-    pub fn get_key_with_prefix(&self, name: &str) -> String {
-        format!("{}/{name}", prefix_normalized(&self.upload.prefix))
-    }
 }
 
 fn deserialize_address<'de, D>(deserializer: D) -> Result<Option<Address>, D::Error>
@@ -89,6 +53,12 @@ pub struct UploadTest {
     /// Overwrite the object if it already exists (true by default)
     #[serde(default = "true_bool")]
     pub overwrite: bool,
+}
+
+impl UploadTest {
+    pub fn get_key_with_prefix(&self, name: &str) -> String {
+        format!("{}/{name}", prefix_normalized(&self.prefix))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum, serde::Deserialize)]

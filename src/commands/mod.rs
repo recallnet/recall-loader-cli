@@ -21,7 +21,7 @@ use runner::TestRunner;
 use tokio::task::JoinSet;
 use tracing::{debug, error, info};
 
-use crate::config::{self, Broadcast, DownloadTest, Target, TestConfig, TestRunConfig, UploadTest};
+use crate::config::{Broadcast, DownloadTest, Target, TestConfig, TestRunConfig, UploadTest};
 use crate::stats::collector::Collector;
 use crate::KeyData;
 
@@ -74,6 +74,9 @@ pub struct QueryOpts {
 
 #[derive(Args, Debug, Clone)]
 pub struct BasicTestOpts {
+    /// Number of accounts
+    #[arg(short, long, default_value = "1")]
+    pub num_accounts: i32,
     /// Everything under /foo by default in bucket. A / is prepended
     /// can use `date +"%s"` to get the unix epoch seconds for a 'random' value for the test
     #[arg(short, long, default_value = "foo")]
@@ -116,33 +119,30 @@ impl From<BasicTestOpts> for TestConfig {
     fn from(opts: BasicTestOpts) -> Self {
         Self {
             funder_private_key: opts.funder_private_key,
-            private_key: Some(opts.key),
             network: opts.network.unwrap_or(Network::Devnet),
-            tests: vec![TestRunConfig {
-                private_key: None,
+            test: TestRunConfig {
+                num_accounts: opts.num_accounts,
                 request_funds: None,
                 buy_credit: opts.buy_credits,
                 target: opts.target,
-                test: config::Test {
-                    upload: UploadTest {
-                        bucket: opts.bucket,
-                        blob_count: opts.blob_cnt,
-                        prefix: opts.prefix,
-                        blob_size: opts.blob_size,
-                        overwrite: true,
-                    },
-                    download: opts.download.then_some(DownloadTest::Full(true)),
-                    delete: opts.delete,
-                    broadcast_mode: opts.broadcast,
+                upload: UploadTest {
+                    bucket: opts.bucket,
+                    blob_count: opts.blob_cnt,
+                    prefix: opts.prefix,
+                    blob_size: opts.blob_size,
+                    overwrite: true,
                 },
-            }],
+                download: opts.download.then_some(DownloadTest::Full(true)),
+                delete: opts.delete,
+                broadcast_mode: opts.broadcast,
+            },
         }
     }
 }
 
 pub async fn run(config: TestConfig) -> Result<()> {
     let collector = Arc::new(Collector::new());
-    let tests = TestRunner::generate(config, collector.clone()).await?;
+    let tests = TestRunner::prepare(config, collector.clone()).await?;
     let mut tasks = JoinSet::new();
     for test in tests.into_iter() {
         tasks.spawn(async move {
