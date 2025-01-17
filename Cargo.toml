@@ -15,6 +15,7 @@ clap = { version = "4.3.0", features = [
     "usage",
     "error-context",
 ], default-features = false }
+ethers = { version = "2.0" }
 hex = "0.4"
 hoku_sdk = { git = "ssh://git@github.com/hokunet/rust-hoku.git", rev = "7274053d9805719d625a590d786a3c3be2e8bd6d" }
 hoku_provider = { git = "ssh://git@github.com/hokunet/rust-hoku.git", rev = "7274053d9805719d625a590d786a3c3be2e8bd6d" }
@@ -26,6 +27,7 @@ tokio = { version = "1.0", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1.85"
+chrono = "0.4.39"
 
 # [patch."ssh://git@github.com/hokunet/rust-hoku.git"]
 # hoku_sdk = {path = "../rust-hoku/sdk"}

@@ -5,6 +5,12 @@ mod runner;
 pub use delete::cleanup;
 pub use query::query;
 
+use std::sync::Arc;
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
+
 use anyhow::Result;
 use clap::Args;
 use hoku_provider::{fvm_shared::address::Address, json_rpc::JsonRpcProvider};
@@ -12,13 +18,11 @@ use hoku_sdk::machine::{bucket::Bucket, Machine};
 use hoku_sdk::network::Network;
 use hoku_signer::{AccountKind, Signer as _, Wallet};
 use runner::TestRunner;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info};
 
 use crate::config::{self, Broadcast, DownloadTest, Target, TestConfig, TestRunConfig, UploadTest};
+use crate::stats::collector::Collector;
 use crate::KeyData;
 
 #[derive(Args, Debug, Clone)]
@@ -77,6 +81,9 @@ pub struct BasicTestOpts {
     /// The private key to use for the signer wallet
     #[arg(short, long, env = "HOKU_PRIVATE_KEY", hide_env_values = true)]
     pub key: String,
+    /// The private key to use for the funder wallet
+    #[arg(short, long, env = "HOKU_FUNDER_PRIVATE_KEY", hide_env_values = true)]
+    pub funder_private_key: String,
     /// The network to use (defaults to devnet)
     #[arg(short, long, env = "HOKU_NETWORK")]
     pub network: Option<Network>,
@@ -97,9 +104,9 @@ pub struct BasicTestOpts {
     pub download: bool,
     #[arg(short = 'c', long, default_value = "100")]
     pub blob_cnt: u32,
-    /// blob size in mb (0.1 = 100 bytes, 1000 = 1gb)
+    /// blob size in bytes
     #[arg(short = 's', long, default_value = "1.0")]
-    pub blob_size_mb: f64,
+    pub blob_size: i64,
     /// Broadcast mode to use for uploads/deletes
     #[arg(long, default_value = "commit")]
     pub broadcast: Broadcast,
@@ -108,10 +115,12 @@ pub struct BasicTestOpts {
 impl From<BasicTestOpts> for TestConfig {
     fn from(opts: BasicTestOpts) -> Self {
         Self {
+            funder_private_key: opts.funder_private_key,
             private_key: Some(opts.key),
             network: opts.network.unwrap_or(Network::Devnet),
             tests: vec![TestRunConfig {
                 private_key: None,
+                request_funds: None,
                 buy_credit: opts.buy_credits,
                 target: opts.target,
                 test: config::Test {
@@ -119,7 +128,7 @@ impl From<BasicTestOpts> for TestConfig {
                         bucket: opts.bucket,
                         blob_count: opts.blob_cnt,
                         prefix: opts.prefix,
-                        blob_size_mb: opts.blob_size_mb,
+                        blob_size: opts.blob_size,
                         overwrite: true,
                     },
                     download: opts.download.then_some(DownloadTest::Full(true)),
@@ -132,30 +141,28 @@ impl From<BasicTestOpts> for TestConfig {
 }
 
 pub async fn run(config: TestConfig) -> Result<()> {
-    let tests = TestRunner::generate(config).await?;
-    let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+    let collector = Arc::new(Collector::new());
+    let tests = TestRunner::generate(config, collector.clone()).await?;
     let mut tasks = JoinSet::new();
-    for (i, test) in tests.into_iter().enumerate() {
-        let tx = tx.clone();
+    for test in tests.into_iter() {
         tasks.spawn(async move {
             match test.execute().await {
-                Ok(res) => {
-                    tx.send((i, res))
-                        .await
-                        .expect("should be able to send result");
-                }
+                Ok(_) => {}
                 Err(e) => {
                     error!(error=?e, "Failed to run test");
                 }
             }
         });
     }
-    drop(tx);
     tasks.join_all().await;
-    while let Some((i, res)) = rx.recv().await {
-        info!("got results for test index: {i}");
-        res.display_stats();
+
+    if let Ok(mut collector) = Arc::try_unwrap(collector) {
+        collector.close().await;
+        collector.display_aggregated()
+    } else {
+        error!("collector is still referenced");
     }
+
     Ok(())
 }
 

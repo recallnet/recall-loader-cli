@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0, MIT
 pub mod commands;
 pub mod config;
+pub mod funder;
+pub mod stats;
 pub mod targets;
 
 use clap::{command, Parser, Subcommand};
@@ -10,8 +12,6 @@ use hoku_signer::{
     key::{parse_secret_key, SecretKey},
     EthAddress,
 };
-
-const MB_F64: f64 = 1000_f64 * 1000_f64;
 
 #[derive(Parser, Debug, Clone)]
 #[command(version)]

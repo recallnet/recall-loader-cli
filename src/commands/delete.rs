@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
 use anyhow::{bail, Context as _};
-use hoku_sdk::{
-    machine::{bucket::DeleteOptions, Machine},
-    network::Network,
-};
+use hoku_provider::tx::BroadcastMode;
+use hoku_sdk::{machine::Machine, network::Network};
 use tracing::{error, info};
 
 use super::{list_bucket_items, setup_provider_wallet_bucket, CleanupOpts};
+
 use crate::config::Target as ConfigTarget;
+use crate::parse_private_key;
 use crate::targets::sdk::SdkTarget;
-use crate::{commands::runner::delete_blob, parse_private_key};
+use crate::targets::Target;
 
 pub async fn cleanup(opts: CleanupOpts) -> anyhow::Result<()> {
     let key = parse_private_key(&opts.key)?;
@@ -47,7 +47,11 @@ pub async fn cleanup(opts: CleanupOpts) -> anyhow::Result<()> {
     }
 
     for key in data {
-        match delete_blob(&key, target.clone(), &machine, DeleteOptions::default()).await {
+        match target
+            .clone()
+            .delete_object(&machine, &key, BroadcastMode::Commit)
+            .await
+        {
             Ok(time) => {
                 info!("deleted blob with {key} in {:?}", time);
             }

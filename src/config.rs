@@ -4,11 +4,10 @@ use hoku_sdk::{
     network::Network,
 };
 
-use crate::MB_F64;
-
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestConfig {
+    pub funder_private_key: String,
     pub private_key: Option<String>,
     pub network: Network,
     pub tests: Vec<TestRunConfig>,
@@ -18,6 +17,7 @@ pub struct TestConfig {
 #[serde(rename_all = "camelCase")]
 pub struct TestRunConfig {
     pub private_key: Option<String>,
+    pub request_funds: Option<u32>,
     pub buy_credit: Option<u32>,
     pub target: Target,
     pub test: Test,
@@ -84,8 +84,8 @@ pub struct UploadTest {
     pub blob_count: u32,
     /// Prefix blobs should be stored under (e.g. foo/bar). Should not end in /
     pub prefix: String,
-    /// Size of each blob in MB e.g. 0.1 = 100 bytes, 1=1MB, 1000 = 1GB
-    pub blob_size_mb: f64,
+    /// Size of each blob in bytes
+    pub blob_size: i64,
     /// Overwrite the object if it already exists (true by default)
     #[serde(default = "true_bool")]
     pub overwrite: bool,
@@ -157,9 +157,8 @@ impl DownloadTest {
 
 impl UploadTest {
     /// returns the size in bytes for each blob
-    pub fn blob_size_bytes(&self) -> usize {
-        let size = MB_F64 * self.blob_size_mb;
-        size.ceil() as usize
+    pub fn blob_size_bytes(&self) -> i64 {
+        self.blob_size
     }
 }
 

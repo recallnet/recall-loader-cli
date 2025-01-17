@@ -1,14 +1,13 @@
 use std::sync::Arc;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use hoku_provider::{
-    fvm_shared::{address::Address, econ::TokenAmount},
-    json_rpc::JsonRpcProvider,
-};
+use chrono::Utc;
+use ethers::types::H160;
+use hoku_provider::{fvm_shared::econ::TokenAmount, json_rpc::JsonRpcProvider};
 use hoku_sdk::{
     credits::{BuyOptions, Credits},
     machine::{
@@ -18,11 +17,14 @@ use hoku_sdk::{
 };
 use hoku_signer::{AccountKind, Signer as _, Wallet};
 use rand::{thread_rng, Rng as _};
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-use tracing::{debug, error, info, trace, warn};
+use tokio::io::AsyncWriteExt as _;
+use tracing::{debug, error, info};
 
 use crate::config::{Target as ConfigTarget, Test, TestConfig};
+use crate::funder::Funder;
 use crate::parse_private_key;
+use crate::stats::collector::Collector;
+use crate::stats::ops::{Operation, OperationType};
 use crate::targets::sdk::SdkTarget;
 use crate::targets::Target;
 
@@ -30,23 +32,17 @@ pub struct TestRunner {
     target: Arc<dyn Target>,
     provider: JsonRpcProvider,
     wallet: Wallet,
+    collector: Arc<Collector>,
     test: Test,
     id: String,
 }
 
 impl TestRunner {
-    pub async fn execute(self) -> Result<TestResult> {
-        let TestRunner {
-            target,
-            provider,
-            mut wallet,
-            test,
-            id,
-        } = self;
-        let delete_opts = test.delete_opts();
-        let upload_config = test.upload.clone();
-        let download_config = test.download.clone();
-        let wait_retries = match test.add_opts().broadcast_mode {
+    pub async fn execute(&self) -> Result<()> {
+        let delete_opts = self.test.delete_opts();
+        let upload_config = self.test.upload.clone();
+        let download_config = self.test.download.clone();
+        let wait_retries = match self.test.add_opts().broadcast_mode {
             hoku_provider::tx::BroadcastMode::Commit => 10,
             _v => 100,
         };
@@ -54,59 +50,45 @@ impl TestRunner {
             let bucket = Bucket::attach(bucket)
                 .await
                 .context("failed to attach bucket")?;
-            info!(%id, "using existing machine as bucket: {}", bucket.address());
+            info!(%self.id, "using existing machine as bucket: {}", bucket.address());
             bucket
         } else {
-            let bucket = target.clone().create_bucket().await?;
+            let bucket = self.target.clone().create_bucket().await?;
             info!(
-                %id,
-                addr=?wallet.address(),
+                %self.id,
+                addr=?self.wallet.address(),
                 "created new bucket {}",
                 bucket.address(),
             );
             bucket
         };
-        let mut results = HashMap::with_capacity(upload_config.blob_count as usize);
-        let mut tx_results = Vec::with_capacity(upload_config.blob_count as usize);
+
+        let mut keys = Vec::with_capacity(upload_config.blob_count as usize);
         for i in 0..upload_config.blob_count {
-            let key = test.get_key_with_prefix(&i.to_string());
-            match upload_blob(
-                target.clone(),
-                &bucket,
-                &key,
-                upload_config.blob_size_bytes(),
-                test.add_opts(),
-            )
-            .await
+            let key = self.test.get_key_with_prefix(&i.to_string());
+
+            if self
+                .upload_blob(
+                    &bucket,
+                    &key,
+                    upload_config.blob_size_bytes(),
+                    self.test.add_opts(),
+                )
+                .await
+                .is_err()
             {
-                Ok(time) => {
-                    info!("Successfully added object {}", key);
-                    tx_results.push(key.clone());
-                    results.insert(
-                        key.clone(),
-                        Timing {
-                            bucket: bucket.address(),
-                            size: upload_config.blob_size_bytes(),
-                            key,
-                            upload_time: Some(time),
-                            download_time: None,
-                            delete_time: None,
-                        },
-                    );
-                }
-                Err(error) => {
-                    error!(?error, %key, %id, "failed to upload");
-                    // need to revert the sequence number since it was incremented by the sdk but failed
-                    // TODO: update SDK to be nicer here
-                    wallet.init_sequence(&provider).await?;
-                    continue;
-                }
+                // need to revert the sequence number since it was incremented by the sdk but failed
+                // TODO: update SDK to be nicer here
+                self.wallet.clone().init_sequence(&self.provider).await?;
+                continue;
             }
+
+            keys.push(key.clone());
         }
 
-        if results.is_empty() {
-            error!(%id,"failed to upload any blobs");
-            bail!("{id} failed to upload blobs");
+        if keys.is_empty() {
+            error!(%self.id,"failed to upload any blobs");
+            bail!("{} failed to upload blobs", self.id);
         }
 
         if download_config
@@ -114,38 +96,23 @@ impl TestRunner {
             .is_some_and(|c| c.should_download())
         {
             let opts = download_config.expect("download config exists").get_opts();
-            loop_until_blob_found(tx_results, target.clone(), &bucket, wait_retries).await;
-            for (key, res) in results.iter_mut() {
-                match download_blob(target.clone(), &bucket, key, opts.clone(), true).await {
-                    Ok(v) => {
-                        res.download_time = Some(v);
-                    }
-                    Err(_error) => {
-                        // logged in download_blob()
-                        // error!(time=?error, key, "error downloading blob");
-                    }
-                }
+            loop_until_blob_found(&keys, self.target.clone(), &bucket, wait_retries).await;
+            for key in &keys {
+                self.download_blob(&bucket, key, opts.clone(), upload_config.blob_size)
+                    .await?;
             }
-        } else {
-            // not needed so give back the ram
-            drop(tx_results);
         }
 
         if let Some(opts) = delete_opts {
-            for (key, res) in results.iter_mut() {
-                if let Ok(time) = delete_blob(key, target.clone(), &bucket, opts.clone()).await {
-                    res.delete_time = Some(time);
-                }
+            for key in &keys {
+                self.delete_blob(key, &bucket, opts.clone()).await?;
             }
         }
 
-        let results: Vec<Timing> = results.into_values().collect();
-        debug!(?results, "upload");
-
-        Ok(TestResult { times: results })
+        Ok(())
     }
 
-    pub async fn generate(config: TestConfig) -> Result<Vec<Self>> {
+    pub async fn generate(config: TestConfig, collector: Arc<Collector>) -> Result<Vec<Self>> {
         let network = config.network;
         let network_cfg = network.get_config();
         let obj_api = network_cfg.object_api_url;
@@ -163,6 +130,18 @@ impl TestRunner {
                 .or_else(|| config.private_key.clone())
                 .ok_or_else(|| anyhow!("privateKey is required"))?;
             let key = parse_private_key(&pk)?;
+
+            if let Some(funds) = test.request_funds {
+                Funder::fund(
+                    &config.funder_private_key,
+                    network_cfg.evm_rpc_url.as_ref(),
+                    H160(key.eth_addr.0),
+                    funds,
+                )
+                .await
+                .context("failed to request funds")?;
+            }
+
             let sk_bytes = key.sk.serialize().to_vec();
             let mut wallet = if let Some(wallet) = wallets.get(&sk_bytes) {
                 wallet.to_owned()
@@ -207,6 +186,7 @@ impl TestRunner {
 
             results.push(TestRunner {
                 provider: provider.clone(),
+                collector: collector.clone(),
                 target,
                 wallet,
                 test: test.test,
@@ -216,187 +196,147 @@ impl TestRunner {
 
         Ok(results)
     }
-}
 
-#[derive(Debug)]
-pub struct TestResult {
-    times: Vec<Timing>,
-}
+    async fn upload_blob(
+        &self,
+        bucket: &Bucket,
+        key: &str,
+        size: i64,
+        opts: AddOptions,
+    ) -> Result<()> {
+        let (temp_file, size) = temp_file(size).await?;
 
-#[derive(Debug)]
-pub struct Timing {
-    bucket: Address,
-    #[allow(dead_code)]
-    key: String,
-    /// in bytes
-    size: usize,
-    upload_time: Option<Duration>,
-    download_time: Option<Duration>,
-    delete_time: Option<Duration>,
-}
+        let mut metadata = HashMap::new();
+        metadata.insert("upload bench test".to_string(), key.to_string());
 
-#[derive(Debug)]
-pub struct TimeInfo {
-    pub avg: f64,
-    pub count: usize,
-    pub total_time: Duration,
-    pub max: Duration,
-    pub min: Duration,
-}
+        let start = Utc::now();
+        let mut operation = Operation {
+            id: self.id.clone(),
+            start,
+            op_type: OperationType::Put,
+            file: key.to_string(),
+            size,
+            ..Default::default()
+        };
 
-#[derive(Debug)]
-pub struct BucketStats {
-    pub address: Address,
-    pub total_bytes: usize,
-    pub time: TimeInfo,
-}
-impl BucketStats {
-    /// mbps (megabits)
-    pub fn mbps(&self) -> f64 {
-        let bps = ((self.total_bytes * 8) as f64) / self.time.total_time.as_secs_f64();
-        bps / 1_000_000_f64
+        return match self
+            .target
+            .add_object(bucket, key, temp_file.file_path(), metadata, opts.overwrite)
+            .await
+        {
+            Ok(_) => {
+                let end = Utc::now();
+                operation.end = end;
+                self.collector.collect(operation).await?;
+
+                let time = end.signed_duration_since(start).num_milliseconds();
+                let address = bucket.address();
+                info!(
+                    %address,
+                    key=%key,
+                    bytes=%size,
+                    "uploaded blob in {} ms",
+                    time,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                let end = Utc::now();
+                operation.end = end;
+                operation.error = err.to_string();
+                self.collector.collect(operation).await?;
+
+                error!(error=?err, %key, "failed to upload");
+                Err(err)
+            }
+        };
     }
 
-    /// MBps
-    pub fn megabytes_per_second(&self) -> f64 {
-        self.mbps() * 0.125
-    }
-}
+    async fn delete_blob(&self, key: &str, bucket: &Bucket, opts: DeleteOptions) -> Result<()> {
+        let mut operation = Operation {
+            id: self.id.clone(),
+            op_type: OperationType::Delete,
+            file: key.to_string(),
+            error: "".to_string(),
+            ..Default::default()
+        };
 
-#[derive(Debug)]
-pub struct TestStats {
-    upload: Option<BucketStats>,
-    download: Option<BucketStats>,
-    delete: Option<BucketStats>,
-}
+        let start = Utc::now();
+        operation.start = start;
+        match self
+            .target
+            .delete_object(bucket, key, opts.broadcast_mode)
+            .await
+        {
+            Ok(_) => {
+                let end = Utc::now();
+                operation.end = end;
+                self.collector.collect(operation).await?;
 
-impl TestStats {
-    pub fn from_upload(data: &TestResult) -> Self {
-        let total_bytes = data.total_bytes();
-        let address = data.bucket_address();
-
-        let upload_stats = TimeInfo::try_from(data.uploads()).ok();
-        let download_stats = TimeInfo::try_from(data.downloads()).ok();
-        let delete_stats = TimeInfo::try_from(data.deletes()).ok();
-
-        let upload = upload_stats.map(|time| BucketStats {
-            address,
-            total_bytes,
-            time,
-        });
-        let download = download_stats.map(|time| BucketStats {
-            address,
-            total_bytes,
-            time,
-        });
-        let delete = delete_stats.map(|time| BucketStats {
-            address,
-            total_bytes,
-            time,
-        });
-        Self {
-            upload,
-            download,
-            delete,
+                let time = end.signed_duration_since(start);
+                debug!(key, time=?time, "deleted");
+                Ok(())
+            }
+            Err(e) => {
+                let end = Utc::now();
+                operation.end = end;
+                operation.error = e.to_string();
+                self.collector.collect(operation).await?;
+                error!(error=?e, %key, "failed to delete");
+                Err(e)
+            }
         }
     }
-}
 
-impl TryFrom<Vec<Duration>> for TimeInfo {
-    type Error = anyhow::Error;
+    async fn download_blob(
+        &self,
+        bucket: &Bucket,
+        key: &str,
+        opts: GetOptions,
+        size: i64,
+    ) -> Result<()> {
+        let start = Utc::now();
+        let mut operation = Operation {
+            id: self.id.clone(),
+            start,
+            op_type: OperationType::Get,
+            size,
+            file: key.to_string(),
+            ..Default::default()
+        };
 
-    fn try_from(value: Vec<Duration>) -> std::result::Result<Self, Self::Error> {
-        if value.is_empty() {
-            bail!("not supported for empty arrays")
-        }
-        let total_time = value.iter().sum::<Duration>();
-        let count = value.len();
-        let avg = total_time.as_secs_f64() / value.len() as f64;
-        let min = *value.iter().min().expect("must have a min");
-        let max = *value.iter().max().expect("must have a max");
-        Ok(Self {
-            avg,
-            count,
-            max,
-            min,
-            total_time,
-        })
-    }
-}
+        let obj_file = async_tempfile::TempFile::new().await.unwrap();
 
-impl TestResult {
-    fn bucket_address(&self) -> Address {
-        let upload_addresses: HashSet<Address> =
-            HashSet::from_iter(self.times.iter().map(|t| t.bucket));
-        let addresses: Vec<_> = upload_addresses.into_iter().collect();
-        if addresses.len() > 1 {
-            warn!(
-                ?addresses,
-                "test used multiple bucket addresses which is unexpected. picking first for reporting"
-            )
-        }
-        addresses
-            .first()
-            .expect("test must have used a bucket")
-            .to_owned()
-    }
+        let result = self
+            .target
+            .get_object(bucket, key, Box::new(obj_file), opts.range)
+            .await;
 
-    fn uploads(&self) -> Vec<Duration> {
-        self.times.iter().flat_map(|t| t.upload_time).collect()
-    }
-
-    fn downloads(&self) -> Vec<Duration> {
-        self.times.iter().flat_map(|t| t.download_time).collect()
-    }
-
-    fn deletes(&self) -> Vec<Duration> {
-        self.times.iter().flat_map(|t| t.delete_time).collect()
-    }
-
-    fn total_bytes(&self) -> usize {
-        self.times.iter().map(|t| t.size).sum()
-    }
-
-    pub fn stats(&self) -> TestStats {
-        TestStats::from_upload(self)
-    }
-
-    pub fn display_stats(&self) {
-        let stats = self.stats();
-        if let Some(s) = stats.upload {
-            info!(address=%s.address, objects=%s.time.count, time=?s.time.total_time, avg_sec=%s.time.avg, max=?s.time.max, min=?s.time.min, mbps=%s.mbps(), MBps=%s.megabytes_per_second(), "upload stats");
-        }
-        if let Some(s) = stats.download {
-            info!(address=%s.address, objects=%s.time.count, time=?s.time.total_time, avg_sec=%s.time.avg, max=?s.time.max, min=?s.time.min, mbps=%s.mbps(), MBps=%s.megabytes_per_second(), "download stats");
-        }
-        if let Some(s) = stats.delete {
-            info!(address=%s.address, objects=%s.time.count, time=?s.time.total_time, avg_sec=%s.time.avg, max=?s.time.max, min=?s.time.min, mbps=%s.mbps(), MBps=%s.megabytes_per_second(), "delete stats");
-        }
-    }
-}
-
-pub(crate) async fn delete_blob(
-    key: &str,
-    target: Arc<dyn Target>,
-    bucket: &Bucket,
-    opts: DeleteOptions,
-) -> Result<Duration> {
-    let delete = Instant::now();
-    match target.delete_object(bucket, key, opts.broadcast_mode).await {
-        Ok(_) => {
-            let delete = delete.elapsed();
-            trace!(key, time=?delete, "deleted");
-            Ok(delete)
-        }
-        Err(e) => {
-            error!(error=?e, %key, "failed to delete");
-            Err(e)
+        match result {
+            Ok(_) => {
+                let end = Utc::now();
+                operation.end = end;
+                self.collector.collect(operation).await?;
+                info!(
+                    "successfully downloaded object {} (took {:?}).",
+                    key,
+                    end.signed_duration_since(start).num_milliseconds()
+                );
+                Ok(())
+            }
+            Err(e) => {
+                operation.end = Utc::now();
+                operation.error = e.to_string();
+                self.collector.collect(operation).await?;
+                error!(error=?e, "failed to download data");
+                Err(e)
+            }
         }
     }
 }
 
 async fn loop_until_blob_found(
-    tx_results: Vec<String>,
+    keys: &[String],
     target: Arc<dyn Target>,
     machine: &Bucket,
     mut retries: u32,
@@ -408,25 +348,18 @@ async fn loop_until_blob_found(
 
     let start = Instant::now();
 
-    for (i, key) in tx_results.iter().enumerate() {
+    for (i, key) in keys.iter().enumerate() {
         while retries > 0 {
-            if let Ok(time) = download_blob(
-                target.clone(),
-                machine,
-                key,
-                GetOptions {
-                    range: Some("0-99".to_string()),
-                    ..Default::default()
-                },
-                false,
-            )
-            .await
+            let writer = tokio::io::sink();
+            if let Ok(time) = target
+                .get_object(machine, key, Box::new(writer), None)
+                .await
             {
                 let time_to_finish = start.elapsed();
                 info!(
                     request_duration=?time,
                     "able to download/resolve object {}/{} in bucket {} (took {:?}).",
-                    i+1, tx_results.len(), machine.address(), time_to_finish
+                    i+1, keys.len(), machine.address(), time_to_finish
                 );
                 break;
             }
@@ -440,79 +373,12 @@ async fn loop_until_blob_found(
     }
 }
 
-async fn download_blob(
-    target: Arc<dyn Target>,
-    bucket: &Bucket,
-    key: &str,
-    opts: GetOptions,
-    log_errors: bool,
-) -> std::result::Result<Duration, Duration> {
-    // Download the actual object at `foo/my_file`
-    let mut obj_file = async_tempfile::TempFile::new().await.unwrap();
-    let obj_path = obj_file.file_path().to_owned();
-    trace!(?opts, "Downloading object to {}", obj_path.display());
-
-    let open_file = obj_file.open_rw().await.unwrap();
-    let now = Instant::now();
-    let result = target
-        .get_object(bucket, key, Box::new(open_file), opts.range)
-        .await;
-
-    let download = now.elapsed();
-    match result {
-        Ok(_) => {
-            // Read the first 10 bytes of your downloaded 100 bytes
-            let mut contents = vec![0; 10];
-            obj_file.read_exact(&mut contents).await.unwrap();
-            debug!("Successfully read first 10 bytes of {}", obj_path.display());
-            Ok(download)
-        }
-        Err(e) => {
-            if log_errors {
-                warn!(error=?e, "failed to download data");
-            } else {
-                debug!(error=?e, "failed to download data");
-            }
-            Err(download)
-        }
-    }
-}
-
-async fn upload_blob(
-    target: Arc<dyn Target>,
-    bucket: &Bucket,
-    key: &str,
-    size: usize,
-    opts: AddOptions,
-) -> Result<Duration> {
-    let (temp_file, size) = temp_file(size).await?;
-
-    let mut metadata = HashMap::new();
-    metadata.insert("upload bench test".to_string(), key.to_string());
-    let start = Instant::now();
-    target
-        .add_object(bucket, key, temp_file.file_path(), metadata, opts.overwrite)
-        .await?;
-
-    let time = start.elapsed();
-    let address = bucket.address();
-    trace!(
-        %address,
-        key=%key,
-        bytes=%size,
-        "uploaded blob in {} ms",
-        time.as_millis(),
-    );
-
-    Ok(time)
-}
-
-async fn temp_file(size: usize) -> Result<(async_tempfile::TempFile, usize)> {
+async fn temp_file(size: i64) -> Result<(async_tempfile::TempFile, i64)> {
     let mut file = async_tempfile::TempFile::new().await?;
 
     let random_data = {
         let mut rng = thread_rng();
-        let mut random_data = vec![0; size];
+        let mut random_data = vec![0; size as usize];
         rng.fill(&mut random_data[..]);
         random_data
     };
