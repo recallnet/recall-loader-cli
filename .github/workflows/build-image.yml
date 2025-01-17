@@ -1,6 +1,7 @@
 name: Build Docker image
 run-name: Building Docker image
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -11,6 +12,7 @@ jobs:
       DOCKER_IMAGE_NAME: us-central1-docker.pkg.dev/ceramic-3box-apps/registry/hoku-loader-cli
       VM_ZONE: us-central1-a
       INSTANCE_TEMPLATE: https://www.googleapis.com/compute/v1/projects/ceramic-3box-apps/regions/us-central1/instanceTemplates/hoku-loader-template
+      MACHINE_TYPE: e2-micro
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -47,4 +49,4 @@ jobs:
           tags: ${{env.DOCKER_IMAGE_NAME}}:latest, ${{env.DOCKER_IMAGE_NAME}}:${{ steps.prep.outputs.VERSION }}
           labels: ${{ steps.meta.outputs.labels }}
       - name: Start VM
-        run: gcloud compute instances create hoku-loader-${{steps.prep.outputs.COMMIT_HASH}} --zone ${{env.VM_ZONE}} --source-instance-template ${{env.INSTANCE_TEMPLATE}}
+        run: gcloud compute instances create hoku-loader-${{steps.prep.outputs.COMMIT_HASH}} --zone ${{env.VM_ZONE}} --source-instance-template ${{env.INSTANCE_TEMPLATE}} --machine-type ${{env.MACHINE_TYPE}}
