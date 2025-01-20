@@ -8,10 +8,8 @@ pub mod targets;
 
 use clap::{command, Parser, Subcommand};
 use commands::{BasicTestOpts, CleanupOpts, QueryOpts, RunTestOpts};
-use hoku_signer::{
-    key::{parse_secret_key, SecretKey},
-    EthAddress,
-};
+use hoku_signer::key::parse_secret_key;
+use hoku_signer::{key::SecretKey, EthAddress};
 
 #[derive(Parser, Debug, Clone)]
 #[command(version)]

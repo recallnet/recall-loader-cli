@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::{cmp, fmt};
 
-use chrono::{DateTime, Duration, Utc};
-
 use crate::stats::ops::{Operation, OperationType, Throughput};
+use chrono::{DateTime, Duration, Utc};
+use tracing::info;
 
 pub struct Aggregator {
     operations: HashMap<OperationType, AggregatedOperation>,
@@ -31,6 +31,20 @@ impl Aggregator {
 
     pub fn display(&self) {
         for (op_type, operation) in &self.operations {
+            info!(
+                operation = %op_type,
+                concurrency = operation.concurrency(),
+                duration = %HumanDuration(operation.duration()),
+                total = operation.n,
+                errors = operation.errors,
+                throughput = %operation.avg_throughput(),
+                objects_per_sec = operation.objects_per_sec(),
+                min_duration = %HumanDuration(operation.min_duration),
+                avg_duration = %HumanDuration(operation.avg_duration()),
+                max_duration = %HumanDuration(operation.max_duration),
+                "Test results"
+            );
+
             println!("----------------------------------------------------");
             println!(
                 "Operation: {}. Concurrency: {}. Duration: {}",

@@ -1,43 +1,19 @@
 {
-    "funderPrivateKey" : "ACCOUNT_USED_TO_FUND_OTHER_ACCOUNTS",
-    "privateKey": "USED_FOR_ALL_TESTS_BY_DEFAULT",
+    "funderPrivateKey" : "FUNDER_PRIVATE_KEY",
     "network": "devnet",
-    "tests": [
-        {
-            "privateKey": null,
-            "requestFunds" : 10,
-            "buyCredit": 5,
-            "target": "sdk",
-            "test": {
-                "upload": {
-                    "bucket": null,
-                    "blobCount": 500,
-                    "prefix": "foo",
-                    "blobSize": 1024,
-                    "overwrite": true
-                },
-                "broadcastMode": "commit",
-                "download": null,
-                "delete": true
-            }
+    "test": {
+        "numAccounts": 1,
+        "requestFunds" : 6,
+        "buyCredit": 5,
+        "target": "sdk",
+        "upload": {
+            "bucket": null,
+            "blobCount": 10,
+            "prefix": "bar",
+            "blobSize": 102400,
+            "overwrite": true
         },
-        {
-            "privateKey": "OVERRIDES_THE_ROOT_PRIVATE_KEY",
-            "requestFunds" : 10,
-            "buyCredit": 5,
-            "target": "sdk",
-            "test": {
-                "upload": {
-                    "bucket": null,
-                    "blobCount": 2,
-                    "prefix": "bar/bar",
-                    "blobSize": 1024,
-                    "overwrite": true
-                },
-                "broadcastMode": "async",
-                "download": true,
-                "delete": true
-            }
-        }
-    ]
+        "download": true,
+        "delete": false
+    }
 }

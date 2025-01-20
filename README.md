@@ -78,52 +78,22 @@ fendermint genesis --genesis-file test-network/genesis.json add-account --public
 
 ```jsonc
 {
-    "privateKey": "USED_FOR_ALL_TESTS_BY_DEFAULT",
+    "funderPrivateKey" : "FUNDER_PRIVATE_KEY",
     "network": "devnet",
-    "tests": [
-        {
-            // specify a key to use for this test
-            "privateKey": null,
-            "buyCredit": 10,
-            "target": "sdk",
-            "test": {
-                "upload": {
-                    // create a new bucket by default
-                    "bucket": null,
-                    "blobCount": 10,
-                    "prefix": "bar",
-                    // 1 MB blobs
-                    "blobSizeMb": 1.0,
-                    // whether to overwrite existing blobs in the bucket
-                    "overwrite": true
-                },
-                // Download the complete blob after uploading (or null/false to skip)
-                "download": true,
-                // Delete the blobs before existing the test
-                "delete": true
-            }
+    "test": {
+        "numAccounts": 1,
+        "requestFunds" : 6,
+        "buyCredit": 5,
+        "target": "sdk",
+        "upload": {
+            "bucket": null,
+            "blobCount": 10,
+            "prefix": "bar",
+            "blobSize": 102400,
+            "overwrite": true
         },
-        {
-            "privateKey": "OVERRIDES_THE_ROOT_PRIVATE_KEY",
-            "buyCredit": 10,
-            "target": "sdk",
-            "test": {
-                "upload": {
-                    "bucket": null,
-                    "blobCount": 2000,
-                    "prefix": "foo",
-                    // 10 MB blobs
-                    "blobSizeMb": 10.0,
-                    "overwrite": true
-                },
-                // commit, async, sync (commit by default)
-                "broadcastMode": "sync",
-                // Download a range of the blobs after uploading (waiting for existence)
-                "download": "0-99",
-                // Delete the blobs before existing the test
-                "delete": true
-            }
-        }
-    ]
+        "download": true,
+        "delete": false
+    }
 }
 ```

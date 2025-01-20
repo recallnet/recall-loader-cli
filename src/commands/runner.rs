@@ -4,58 +4,56 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, Context as _, Result};
+use anyhow::{bail, Context as _, Result};
 use chrono::Utc;
 use ethers::types::H160;
+use hoku_provider::tx::BroadcastMode;
 use hoku_provider::{fvm_shared::econ::TokenAmount, json_rpc::JsonRpcProvider};
 use hoku_sdk::{
     credits::{BuyOptions, Credits},
     machine::{
-        bucket::{AddOptions, Bucket, DeleteOptions, GetOptions},
+        bucket::{Bucket, GetOptions},
         Machine,
     },
 };
-use hoku_signer::{AccountKind, Signer as _, Wallet};
+use hoku_signer::key::random_secretkey;
+use hoku_signer::{AccountKind, EthAddress, Signer as _, Wallet};
 use rand::{thread_rng, Rng as _};
 use tokio::io::AsyncWriteExt as _;
 use tracing::{debug, error, info};
 
-use crate::config::{Target as ConfigTarget, Test, TestConfig};
+use crate::config::{Target as ConfigTarget, TestConfig, TestRunConfig};
 use crate::funder::Funder;
-use crate::parse_private_key;
 use crate::stats::collector::Collector;
 use crate::stats::ops::{Operation, OperationType};
 use crate::targets::sdk::SdkTarget;
 use crate::targets::Target;
+use crate::KeyData;
 
 pub struct TestRunner {
     target: Arc<dyn Target>,
     provider: JsonRpcProvider,
     wallet: Wallet,
     collector: Arc<Collector>,
-    test: Test,
-    id: String,
+    test: TestRunConfig,
+    thread_id: String,
 }
 
 impl TestRunner {
     pub async fn execute(&self) -> Result<()> {
-        let delete_opts = self.test.delete_opts();
         let upload_config = self.test.upload.clone();
         let download_config = self.test.download.clone();
-        let wait_retries = match self.test.add_opts().broadcast_mode {
-            hoku_provider::tx::BroadcastMode::Commit => 10,
-            _v => 100,
-        };
+
         let bucket = if let Some(bucket) = upload_config.bucket {
             let bucket = Bucket::attach(bucket)
                 .await
                 .context("failed to attach bucket")?;
-            info!(%self.id, "using existing machine as bucket: {}", bucket.address());
+            info!(%self.thread_id, "using existing machine as bucket: {}", bucket.address());
             bucket
         } else {
             let bucket = self.target.clone().create_bucket().await?;
             info!(
-                %self.id,
+                %self.thread_id,
                 addr=?self.wallet.address(),
                 "created new bucket {}",
                 bucket.address(),
@@ -65,14 +63,14 @@ impl TestRunner {
 
         let mut keys = Vec::with_capacity(upload_config.blob_count as usize);
         for i in 0..upload_config.blob_count {
-            let key = self.test.get_key_with_prefix(&i.to_string());
+            let key = self.test.upload.get_key_with_prefix(&i.to_string());
 
             if self
                 .upload_blob(
                     &bucket,
                     &key,
                     upload_config.blob_size_bytes(),
-                    self.test.add_opts(),
+                    self.test.upload.overwrite,
                 )
                 .await
                 .is_err()
@@ -87,8 +85,8 @@ impl TestRunner {
         }
 
         if keys.is_empty() {
-            error!(%self.id,"failed to upload any blobs");
-            bail!("{} failed to upload blobs", self.id);
+            error!(%self.thread_id,"failed to upload any blobs");
+            bail!("{} failed to upload blobs", self.thread_id);
         }
 
         if download_config
@@ -96,42 +94,44 @@ impl TestRunner {
             .is_some_and(|c| c.should_download())
         {
             let opts = download_config.expect("download config exists").get_opts();
-            loop_until_blob_found(&keys, self.target.clone(), &bucket, wait_retries).await;
+            loop_until_blob_found(&keys, self.target.clone(), &bucket, 10).await;
             for key in &keys {
                 self.download_blob(&bucket, key, opts.clone(), upload_config.blob_size)
                     .await?;
             }
         }
 
-        if let Some(opts) = delete_opts {
+        if self.test.delete {
             for key in &keys {
-                self.delete_blob(key, &bucket, opts.clone()).await?;
+                self.delete_blob(key, &bucket, self.test.broadcast_mode.into())
+                    .await?;
             }
         }
 
         Ok(())
     }
 
-    pub async fn generate(config: TestConfig, collector: Arc<Collector>) -> Result<Vec<Self>> {
+    pub async fn prepare(config: TestConfig, collector: Arc<Collector>) -> Result<Vec<Self>> {
         let network = config.network;
         let network_cfg = network.get_config();
         let obj_api = network_cfg.object_api_url;
         info!("using network '{network}' and object api: {obj_api}");
 
-        let mut results: Vec<TestRunner> = Vec::with_capacity(config.tests.len());
+        let mut results: Vec<TestRunner> = Vec::with_capacity(config.test.num_accounts as usize);
         let provider = JsonRpcProvider::new_http(network_cfg.rpc_url, None, Some(obj_api))
             .context("failed to setup json provider")?;
         // reuse wallets because we can't have multiple due to msg/actor sequence numbers getting out of sync
         // this wallet won't be able to be used concurrently as there's a mutex around the sequence number but it's better than errors
         let mut wallets: HashMap<Vec<u8>, Wallet> = HashMap::new();
-        for (i, test) in config.tests.into_iter().enumerate() {
-            let pk = test
-                .private_key
-                .or_else(|| config.private_key.clone())
-                .ok_or_else(|| anyhow!("privateKey is required"))?;
-            let key = parse_private_key(&pk)?;
+        for i in 0..config.test.num_accounts {
+            // create random account
+            let sk = random_secretkey();
+            let eth_addr = EthAddress::from(sk.public_key());
+            let key = KeyData { sk, eth_addr };
 
-            if let Some(funds) = test.request_funds {
+            info!("account created {}", eth_addr.to_string());
+
+            if let Some(funds) = config.test.request_funds {
                 Funder::fund(
                     &config.funder_private_key,
                     network_cfg.evm_rpc_url.as_ref(),
@@ -162,7 +162,7 @@ impl TestRunner {
             };
             info!(eth_address=?key.eth_addr, "using wallet for eth address");
 
-            if let Some(credits) = test.buy_credit {
+            if let Some(credits) = config.test.buy_credit {
                 let addr = wallet.address();
                 let tx = Credits::buy(
                     &provider,
@@ -176,7 +176,7 @@ impl TestRunner {
                 info!(eth_addr=?key.eth_addr, f_addr=?addr, "bought credits {credits} in tx {}", tx.hash);
             }
 
-            let target = match test.target {
+            let target = match config.test.target {
                 ConfigTarget::Sdk => Arc::new(SdkTarget {
                     provider: provider.clone(),
                     wallet: wallet.clone(),
@@ -189,8 +189,8 @@ impl TestRunner {
                 collector: collector.clone(),
                 target,
                 wallet,
-                test: test.test,
-                id: format!("{i}-{}", key.eth_addr),
+                test: config.test.clone(),
+                thread_id: format!("{i}-{}", key.eth_addr),
             })
         }
 
@@ -202,7 +202,7 @@ impl TestRunner {
         bucket: &Bucket,
         key: &str,
         size: i64,
-        opts: AddOptions,
+        overwrite: bool,
     ) -> Result<()> {
         let (temp_file, size) = temp_file(size).await?;
 
@@ -211,7 +211,7 @@ impl TestRunner {
 
         let start = Utc::now();
         let mut operation = Operation {
-            id: self.id.clone(),
+            id: self.thread_id.clone(),
             start,
             op_type: OperationType::Put,
             file: key.to_string(),
@@ -221,7 +221,7 @@ impl TestRunner {
 
         return match self
             .target
-            .add_object(bucket, key, temp_file.file_path(), metadata, opts.overwrite)
+            .add_object(bucket, key, temp_file.file_path(), metadata, overwrite)
             .await
         {
             Ok(_) => {
@@ -252,9 +252,14 @@ impl TestRunner {
         };
     }
 
-    async fn delete_blob(&self, key: &str, bucket: &Bucket, opts: DeleteOptions) -> Result<()> {
+    async fn delete_blob(
+        &self,
+        key: &str,
+        bucket: &Bucket,
+        broadcast_mode: BroadcastMode,
+    ) -> Result<()> {
         let mut operation = Operation {
-            id: self.id.clone(),
+            id: self.thread_id.clone(),
             op_type: OperationType::Delete,
             file: key.to_string(),
             error: "".to_string(),
@@ -263,11 +268,7 @@ impl TestRunner {
 
         let start = Utc::now();
         operation.start = start;
-        match self
-            .target
-            .delete_object(bucket, key, opts.broadcast_mode)
-            .await
-        {
+        match self.target.delete_object(bucket, key, broadcast_mode).await {
             Ok(_) => {
                 let end = Utc::now();
                 operation.end = end;
@@ -297,7 +298,7 @@ impl TestRunner {
     ) -> Result<()> {
         let start = Utc::now();
         let mut operation = Operation {
-            id: self.id.clone(),
+            id: self.thread_id.clone(),
             start,
             op_type: OperationType::Get,
             size,
@@ -346,8 +347,15 @@ async fn loop_until_blob_found(
         machine.address()
     );
 
-    let start = Instant::now();
+    // We wait the last 10 objects to be found.
+    // It's highly likely the other objects are resolvable.
+    let keys = if keys.len() > 10 {
+        &keys[keys.len() - 10..]
+    } else {
+        keys
+    };
 
+    let start = Instant::now();
     for (i, key) in keys.iter().enumerate() {
         while retries > 0 {
             let writer = tokio::io::sink();
