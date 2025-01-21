@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::config::Broadcast;
 use anyhow::Result;
 use async_trait::async_trait;
-use hoku_provider::tx::BroadcastMode;
 use hoku_sdk::machine::bucket::Bucket;
 use tokio::io::AsyncWrite;
 
@@ -25,6 +25,7 @@ pub trait Target: Send + Sync {
         path: &Path,
         metadata: HashMap<String, String>,
         overwrite: bool,
+        broadcast_mode: Broadcast,
     ) -> Result<()>;
 
     async fn get_object(
@@ -34,10 +35,5 @@ pub trait Target: Send + Sync {
         writer: Box<dyn AsyncWrite + Unpin + Send + 'static>,
         range: Option<String>,
     ) -> Result<()>;
-    async fn delete_object(
-        &self,
-        bucket: &Bucket,
-        key: &str,
-        broadcast_mode: BroadcastMode,
-    ) -> Result<()>;
+    async fn delete_object(&self, bucket: &Bucket, key: &str) -> Result<()>;
 }

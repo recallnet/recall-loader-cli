@@ -1,34 +1,31 @@
-use std::sync::Arc;
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
+use crate::commands::downloader::Downloader;
+use crate::config::{
+    Broadcast, RandomizedNetwork, Target as ConfigTarget, TestConfig, TestRunConfig,
 };
-
-use anyhow::{bail, Context as _, Result};
-use chrono::Utc;
-use ethers::types::H160;
-use hoku_provider::tx::BroadcastMode;
-use hoku_provider::{fvm_shared::econ::TokenAmount, json_rpc::JsonRpcProvider};
-use hoku_sdk::{
-    credits::{BuyOptions, Credits},
-    machine::{
-        bucket::{Bucket, GetOptions},
-        Machine,
-    },
-};
-use hoku_signer::key::random_secretkey;
-use hoku_signer::{AccountKind, EthAddress, Signer as _, Wallet};
-use rand::{thread_rng, Rng as _};
-use tokio::io::AsyncWriteExt as _;
-use tracing::{debug, error, info};
-
-use crate::config::{Target as ConfigTarget, TestConfig, TestRunConfig};
 use crate::funder::Funder;
 use crate::stats::collector::Collector;
 use crate::stats::ops::{Operation, OperationType};
 use crate::targets::sdk::SdkTarget;
 use crate::targets::Target;
 use crate::KeyData;
+use anyhow::{bail, Context as _, Result};
+use chrono::Utc;
+use ethers::types::H160;
+use hoku_provider::{fvm_shared::econ::TokenAmount, json_rpc::JsonRpcProvider};
+use hoku_sdk::{
+    credits::{BuyOptions, Credits},
+    machine::{bucket::Bucket, Machine},
+};
+use hoku_signer::key::random_secretkey;
+use hoku_signer::{AccountKind, EthAddress, Signer as _, Wallet};
+use rand::{thread_rng, Rng as _};
+use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
+use tokio::io::AsyncWriteExt as _;
+use tracing::{debug, error, info, warn};
 
 pub struct TestRunner {
     target: Arc<dyn Target>,
@@ -70,7 +67,8 @@ impl TestRunner {
                     &bucket,
                     &key,
                     upload_config.blob_size_bytes(),
-                    self.test.upload.overwrite,
+                    upload_config.broadcast_mode,
+                    upload_config.overwrite,
                 )
                 .await
                 .is_err()
@@ -89,22 +87,23 @@ impl TestRunner {
             bail!("{} failed to upload blobs", self.thread_id);
         }
 
-        if download_config
-            .as_ref()
-            .is_some_and(|c| c.should_download())
-        {
-            let opts = download_config.expect("download config exists").get_opts();
+        if let Some(config) = download_config {
             loop_until_blob_found(&keys, self.target.clone(), &bucket, 10).await;
-            for key in &keys {
-                self.download_blob(&bucket, key, opts.clone(), upload_config.blob_size)
-                    .await?;
-            }
+            let mut downloader = Downloader::new(
+                self.target.clone(),
+                self.collector.clone(),
+                self.thread_id.clone(),
+                bucket.address(),
+                config.concurrency(),
+                upload_config.blob_size,
+            );
+            downloader.download(&keys).await?;
+            downloader.close().await;
         }
 
         if self.test.delete {
             for key in &keys {
-                self.delete_blob(key, &bucket, self.test.broadcast_mode.into())
-                    .await?;
+                self.delete_blob(key, &bucket).await?;
             }
         }
 
@@ -114,12 +113,15 @@ impl TestRunner {
     pub async fn prepare(config: TestConfig, collector: Arc<Collector>) -> Result<Vec<Self>> {
         let network = config.network;
         let network_cfg = network.get_config();
-        let obj_api = network_cfg.object_api_url;
-        info!("using network '{network}' and object api: {obj_api}");
+        info!("using network '{network}'");
 
         let mut results: Vec<TestRunner> = Vec::with_capacity(config.test.num_accounts as usize);
-        let provider = JsonRpcProvider::new_http(network_cfg.rpc_url, None, Some(obj_api))
-            .context("failed to setup json provider")?;
+        let provider = JsonRpcProvider::new_http(
+            network.random_rpc_url(),
+            None,
+            Some(network.random_objects_api_url()),
+        )
+        .context("failed to setup json provider")?;
         // reuse wallets because we can't have multiple due to msg/actor sequence numbers getting out of sync
         // this wallet won't be able to be used concurrently as there's a mutex around the sequence number but it's better than errors
         let mut wallets: HashMap<Vec<u8>, Wallet> = HashMap::new();
@@ -132,14 +134,16 @@ impl TestRunner {
             info!("account created {}", eth_addr.to_string());
 
             if let Some(funds) = config.test.request_funds {
-                Funder::fund(
+                if let Err(err) = Funder::fund(
                     &config.funder_private_key,
                     network_cfg.evm_rpc_url.as_ref(),
                     H160(key.eth_addr.0),
                     funds,
                 )
-                .await
-                .context("failed to request funds")?;
+                .await {
+                    warn!("failed to request funds. err = {}", err);
+                    continue
+                }
             }
 
             let sk_bytes = key.sk.serialize().to_vec();
@@ -153,12 +157,20 @@ impl TestRunner {
                     network_cfg.subnet_id.clone(),
                 )
                 .context("failed to create wallet")?;
-                wallet.init_sequence(&provider).await.context(format!(
-                    "does address exist on chain (eth={:?})",
-                    key.eth_addr
-                ))?;
-                wallets.insert(sk_bytes, wallet.clone());
-                wallet
+                match wallet.init_sequence(&provider).await {
+                    Ok(_) => {
+                        wallets.insert(sk_bytes, wallet.clone());
+                        wallet
+                    }
+                    Err(err) => {
+                        warn!(
+                            "does address exist on chain (eth={:?}), err = {}",
+                            key.eth_addr,
+                            err
+                        );
+                        continue
+                    }
+                }
             };
             info!(eth_address=?key.eth_addr, "using wallet for eth address");
 
@@ -202,10 +214,10 @@ impl TestRunner {
         bucket: &Bucket,
         key: &str,
         size: i64,
+        broadcast_mode: Broadcast,
         overwrite: bool,
     ) -> Result<()> {
         let (temp_file, size) = temp_file(size).await?;
-
         let mut metadata = HashMap::new();
         metadata.insert("upload bench test".to_string(), key.to_string());
 
@@ -221,7 +233,14 @@ impl TestRunner {
 
         return match self
             .target
-            .add_object(bucket, key, temp_file.file_path(), metadata, overwrite)
+            .add_object(
+                bucket,
+                key,
+                temp_file.file_path(),
+                metadata,
+                overwrite,
+                broadcast_mode,
+            )
             .await
         {
             Ok(_) => {
@@ -252,12 +271,7 @@ impl TestRunner {
         };
     }
 
-    async fn delete_blob(
-        &self,
-        key: &str,
-        bucket: &Bucket,
-        broadcast_mode: BroadcastMode,
-    ) -> Result<()> {
+    async fn delete_blob(&self, key: &str, bucket: &Bucket) -> Result<()> {
         let mut operation = Operation {
             id: self.thread_id.clone(),
             op_type: OperationType::Delete,
@@ -268,7 +282,7 @@ impl TestRunner {
 
         let start = Utc::now();
         operation.start = start;
-        match self.target.delete_object(bucket, key, broadcast_mode).await {
+        match self.target.delete_object(bucket, key).await {
             Ok(_) => {
                 let end = Utc::now();
                 operation.end = end;
@@ -288,52 +302,6 @@ impl TestRunner {
             }
         }
     }
-
-    async fn download_blob(
-        &self,
-        bucket: &Bucket,
-        key: &str,
-        opts: GetOptions,
-        size: i64,
-    ) -> Result<()> {
-        let start = Utc::now();
-        let mut operation = Operation {
-            id: self.thread_id.clone(),
-            start,
-            op_type: OperationType::Get,
-            size,
-            file: key.to_string(),
-            ..Default::default()
-        };
-
-        let obj_file = async_tempfile::TempFile::new().await.unwrap();
-
-        let result = self
-            .target
-            .get_object(bucket, key, Box::new(obj_file), opts.range)
-            .await;
-
-        match result {
-            Ok(_) => {
-                let end = Utc::now();
-                operation.end = end;
-                self.collector.collect(operation).await?;
-                info!(
-                    "successfully downloaded object {} (took {:?}).",
-                    key,
-                    end.signed_duration_since(start).num_milliseconds()
-                );
-                Ok(())
-            }
-            Err(e) => {
-                operation.end = Utc::now();
-                operation.error = e.to_string();
-                self.collector.collect(operation).await?;
-                error!(error=?e, "failed to download data");
-                Err(e)
-            }
-        }
-    }
 }
 
 async fn loop_until_blob_found(
@@ -347,12 +315,12 @@ async fn loop_until_blob_found(
         machine.address()
     );
 
-    // We wait the last 10 objects to be found.
-    // It's highly likely the other objects are resolvable.
+    // We wait for the objects from start, middle and end to be resolvable.
+    // It's highly likely the other objects are resolvable too.
     let keys = if keys.len() > 10 {
-        &keys[keys.len() - 10..]
+        vec![keys[0].clone(), keys[keys.len() / 2].clone(), keys[keys.len() - 1].clone()]
     } else {
-        keys
+        keys.to_vec()
     };
 
     let start = Instant::now();

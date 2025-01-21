@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::{bail, Context as _};
-use hoku_provider::tx::BroadcastMode;
 use hoku_sdk::{machine::Machine, network::Network};
 use tracing::{error, info};
 
@@ -47,11 +46,7 @@ pub async fn cleanup(opts: CleanupOpts) -> anyhow::Result<()> {
     }
 
     for key in data {
-        match target
-            .clone()
-            .delete_object(&machine, &key, BroadcastMode::Commit)
-            .await
-        {
+        match target.clone().delete_object(&machine, &key).await {
             Ok(time) => {
                 info!("deleted blob with {key} in {:?}", time);
             }

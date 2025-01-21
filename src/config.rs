@@ -1,5 +1,9 @@
+use hoku_provider::json_rpc::Url;
 use hoku_provider::{fvm_shared::address::Address, tx::BroadcastMode};
-use hoku_sdk::{machine::bucket::GetOptions, network::Network};
+use hoku_sdk::network::Network;
+use rand::prelude::SliceRandom;
+use rand::thread_rng;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,10 +25,6 @@ pub struct TestRunConfig {
     /// Only public for cli to set, should use getter
     pub download: Option<DownloadTest>,
     pub delete: bool,
-    /// Broadcast mode for the transactions in the tests
-    /// TODO: shared for now, could be per tx type in the future if it's interesting
-    #[serde(default)]
-    pub broadcast_mode: Broadcast,
 }
 
 fn deserialize_address<'de, D>(deserializer: D) -> Result<Option<Address>, D::Error>
@@ -53,6 +53,9 @@ pub struct UploadTest {
     /// Overwrite the object if it already exists (true by default)
     #[serde(default = "true_bool")]
     pub overwrite: bool,
+    /// Broadcast mode for the transactions in the tests
+    #[serde(default)]
+    pub broadcast_mode: Broadcast,
 }
 
 impl UploadTest {
@@ -97,31 +100,13 @@ fn true_bool() -> bool {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[serde(untagged)]
-pub enum DownloadTest {
-    /// For now, if set to false, will not download
-    /// should value be ignored? just needed something to deserialize
-    Full(bool),
-    Range(String),
+pub struct DownloadTest {
+    concurrency: i32,
 }
 
 impl DownloadTest {
-    pub fn should_download(&self) -> bool {
-        !matches!(self, DownloadTest::Full(false))
-    }
-
-    pub fn get_opts(&self) -> GetOptions {
-        GetOptions {
-            range: self.range(),
-            ..Default::default()
-        }
-    }
-
-    fn range(&self) -> Option<String> {
-        match self {
-            DownloadTest::Range(s) => Some(s.to_owned()),
-            DownloadTest::Full(_) => None,
-        }
+    pub fn concurrency(&self) -> i32 {
+        self.concurrency
     }
 }
 
@@ -145,3 +130,48 @@ pub fn prefix_normalized(prefix: &str) -> String {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryTest {}
+
+pub trait RandomizedNetwork {
+    fn random_rpc_url(&self) -> Url;
+    fn random_objects_api_url(&self) -> Url;
+}
+
+impl RandomizedNetwork for Network {
+    fn random_rpc_url(&self) -> Url {
+        let urls = match self {
+            Network::Mainnet => unimplemented!(),
+            Network::Testnet => vec![
+                "https://api-ignition-0.hoku.sh",
+                "https://api-ignition-1.hoku.sh",
+            ],
+            Network::Localnet => vec![
+                "http://localhost:26657",
+                "http://localhost:26757",
+                "http://localhost:26857",
+            ],
+            Network::Devnet => vec!["http://localhost:26657"],
+        };
+        let mut rng = thread_rng();
+        let url = urls.choose(&mut rng).unwrap();
+        Url::from_str(url).unwrap()
+    }
+
+    fn random_objects_api_url(&self) -> Url {
+        let urls = match self {
+            Network::Mainnet => unimplemented!(),
+            Network::Testnet => vec![
+                "https://object-api-ignition-0.hoku.sh",
+                "https://object-api-ignition-1.hoku.sh",
+            ],
+            Network::Localnet => vec![
+                "http://localhost:8001",
+                "http://localhost:8002",
+                "http://localhost:8003",
+            ],
+            Network::Devnet => vec!["http://localhost:8001"],
+        };
+        let mut rng = thread_rng();
+        let url = urls.choose(&mut rng).unwrap();
+        Url::from_str(url).unwrap()
+    }
+}

@@ -1,10 +1,12 @@
 mod delete;
+mod downloader;
 mod query;
 mod runner;
 
 pub use delete::cleanup;
 pub use query::query;
 
+use std::default::Default;
 use std::sync::Arc;
 use std::{
     path::PathBuf,
@@ -21,7 +23,7 @@ use runner::TestRunner;
 use tokio::task::JoinSet;
 use tracing::{debug, error, info};
 
-use crate::config::{Broadcast, DownloadTest, Target, TestConfig, TestRunConfig, UploadTest};
+use crate::config::{Broadcast, Target, TestConfig, TestRunConfig, UploadTest};
 use crate::stats::collector::Collector;
 use crate::KeyData;
 
@@ -131,10 +133,10 @@ impl From<BasicTestOpts> for TestConfig {
                     prefix: opts.prefix,
                     blob_size: opts.blob_size,
                     overwrite: true,
+                    broadcast_mode: opts.broadcast,
                 },
-                download: opts.download.then_some(DownloadTest::Full(true)),
+                download: Default::default(),
                 delete: opts.delete,
-                broadcast_mode: opts.broadcast,
             },
         }
     }
