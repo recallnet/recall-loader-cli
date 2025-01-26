@@ -8,7 +8,7 @@ use std::str::FromStr;
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestConfig {
-    pub funder_private_key: String,
+    pub admin_private_key: String,
     pub network: Network,
     pub test: TestRunConfig,
 }
@@ -17,8 +17,6 @@ pub struct TestConfig {
 #[serde(rename_all = "camelCase")]
 pub struct TestRunConfig {
     pub num_accounts: i32,
-    pub request_funds: Option<u32>,
-    pub buy_credit: Option<u32>,
     pub target: Target,
     pub upload: UploadTest,
     /// Whether to download the full object or use a range query.

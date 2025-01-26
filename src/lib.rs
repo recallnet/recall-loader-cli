@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0, MIT
 pub mod commands;
 pub mod config;
-pub mod funder;
 pub mod stats;
 pub mod targets;
 
