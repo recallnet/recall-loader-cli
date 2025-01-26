@@ -2,7 +2,6 @@ use crate::commands::downloader::Downloader;
 use crate::config::{
     Broadcast, RandomizedNetwork, Target as ConfigTarget, TestConfig, TestRunConfig,
 };
-use crate::funder::Funder;
 use crate::stats::collector::Collector;
 use crate::stats::ops::{Operation, OperationType};
 use crate::targets::sdk::SdkTarget;
@@ -10,13 +9,15 @@ use crate::targets::Target;
 use crate::KeyData;
 use anyhow::{bail, Context as _, Result};
 use chrono::Utc;
-use ethers::types::H160;
+use hoku_provider::fvm_shared::address::Address;
 use hoku_provider::{fvm_shared::econ::TokenAmount, json_rpc::JsonRpcProvider};
+use hoku_sdk::account::{Account, SetSponsorOptions};
+use hoku_sdk::credits::ApproveOptions;
 use hoku_sdk::{
-    credits::{BuyOptions, Credits},
+    credits::Credits,
     machine::{bucket::Bucket, Machine},
 };
-use hoku_signer::key::random_secretkey;
+use hoku_signer::key::{parse_secret_key, random_secretkey};
 use hoku_signer::{AccountKind, EthAddress, Signer as _, Wallet};
 use rand::{thread_rng, Rng as _};
 use std::sync::Arc;
@@ -34,6 +35,7 @@ pub struct TestRunner {
     collector: Arc<Collector>,
     test: TestRunConfig,
     thread_id: String,
+    bucket_address: Address,
 }
 
 impl TestRunner {
@@ -41,27 +43,11 @@ impl TestRunner {
         let upload_config = self.test.upload.clone();
         let download_config = self.test.download.clone();
 
-        let bucket = if let Some(bucket) = upload_config.bucket {
-            let bucket = Bucket::attach(bucket)
-                .await
-                .context("failed to attach bucket")?;
-            info!(%self.thread_id, "using existing machine as bucket: {}", bucket.address());
-            bucket
-        } else {
-            let bucket = self.target.clone().create_bucket().await?;
-            info!(
-                %self.thread_id,
-                addr=?self.wallet.address(),
-                "created new bucket {}",
-                bucket.address(),
-            );
-            bucket
-        };
+        let bucket = Bucket::attach(self.bucket_address).await?;
 
         let mut keys = Vec::with_capacity(upload_config.blob_count as usize);
         for i in 0..upload_config.blob_count {
             let key = self.test.upload.get_key_with_prefix(&i.to_string());
-
             if self
                 .upload_blob(
                     &bucket,
@@ -118,10 +104,28 @@ impl TestRunner {
         let mut results: Vec<TestRunner> = Vec::with_capacity(config.test.num_accounts as usize);
         let provider = JsonRpcProvider::new_http(
             network.random_rpc_url(),
+            network_cfg.subnet_id.chain_id(),
             None,
             Some(network.random_objects_api_url()),
         )
         .context("failed to setup json provider")?;
+
+        let sk = parse_secret_key(&config.admin_private_key)?;
+        let mut signer =
+            Wallet::new_secp256k1(sk, AccountKind::Ethereum, network_cfg.subnet_id.clone())?;
+        signer.init_sequence(&provider).await?;
+
+        let (bucket, _) = Bucket::new(
+            &provider,
+            &mut signer,
+            None,
+            HashMap::new(),
+            Default::default(),
+        )
+        .await?;
+
+        info!("bucket created {}", bucket.address());
+
         // reuse wallets because we can't have multiple due to msg/actor sequence numbers getting out of sync
         // this wallet won't be able to be used concurrently as there's a mutex around the sequence number but it's better than errors
         let mut wallets: HashMap<Vec<u8>, Wallet> = HashMap::new();
@@ -133,21 +137,18 @@ impl TestRunner {
 
             info!("account created {}", eth_addr.to_string());
 
-            if let Some(funds) = config.test.request_funds {
-                if let Err(err) = Funder::fund(
-                    &config.funder_private_key,
-                    network_cfg.evm_rpc_url.as_ref(),
-                    H160(key.eth_addr.0),
-                    funds,
-                )
-                .await {
-                    warn!("failed to request funds. err = {}", err);
-                    continue
-                }
-            }
+            Account::transfer(
+                &signer,
+                Address::from(eth_addr),
+                network_cfg.subnet_config(),
+                TokenAmount::from_whole(1),
+            )
+            .await?;
+
+            info!("transferred funds");
 
             let sk_bytes = key.sk.serialize().to_vec();
-            let mut wallet = if let Some(wallet) = wallets.get(&sk_bytes) {
+            let wallet = if let Some(wallet) = wallets.get(&sk_bytes) {
                 wallet.to_owned()
             } else {
                 // Setup local wallet using private key from arg
@@ -165,28 +166,35 @@ impl TestRunner {
                     Err(err) => {
                         warn!(
                             "does address exist on chain (eth={:?}), err = {}",
-                            key.eth_addr,
-                            err
+                            key.eth_addr, err
                         );
-                        continue
+                        continue;
                     }
                 }
             };
             info!(eth_address=?key.eth_addr, "using wallet for eth address");
+            signer.init_sequence(&provider).await?;
+            let from = signer.address();
+            let _tx = Credits::approve(
+                &provider,
+                &mut signer,
+                from,
+                Address::from(eth_addr),
+                ApproveOptions {
+                    ..Default::default()
+                },
+            )
+            .await?;
 
-            if let Some(credits) = config.test.buy_credit {
-                let addr = wallet.address();
-                let tx = Credits::buy(
-                    &provider,
-                    &mut wallet,
-                    addr,
-                    TokenAmount::from_whole(credits),
-                    BuyOptions::default(),
-                )
-                .await
-                .context("failed to buy credits")?;
-                info!(eth_addr=?key.eth_addr, f_addr=?addr, "bought credits {credits} in tx {}", tx.hash);
-            }
+            let _tx = Account::set_sponsor(
+                &provider,
+                &mut signer,
+                Some(from),
+                SetSponsorOptions {
+                    ..Default::default()
+                },
+            )
+            .await?;
 
             let target = match config.test.target {
                 ConfigTarget::Sdk => Arc::new(SdkTarget {
@@ -203,6 +211,7 @@ impl TestRunner {
                 wallet,
                 test: config.test.clone(),
                 thread_id: format!("{i}-{}", key.eth_addr),
+                bucket_address: bucket.address(),
             })
         }
 
@@ -318,7 +327,11 @@ async fn loop_until_blob_found(
     // We wait for the objects from start, middle and end to be resolvable.
     // It's highly likely the other objects are resolvable too.
     let keys = if keys.len() > 10 {
-        vec![keys[0].clone(), keys[keys.len() / 2].clone(), keys[keys.len() - 1].clone()]
+        vec![
+            keys[0].clone(),
+            keys[keys.len() / 2].clone(),
+            keys[keys.len() - 1].clone(),
+        ]
     } else {
         keys.to_vec()
     };

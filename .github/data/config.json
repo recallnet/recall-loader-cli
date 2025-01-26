@@ -1,13 +1,10 @@
 {
-  "funderPrivateKey" : "01019316fb69a16e73bd51de96757d750743b2f44ebc3573116502775d01c37a",
+  "adminPrivateKey" : "01019316fb69a16e73bd51de96757d750743b2f44ebc3573116502775d01c37a",
   "network": "testnet",
   "test": {
     "numAccounts": 50,
-    "requestFunds" : 11,
-    "buyCredit": 10,
     "target": "sdk",
     "upload": {
-      "bucket": null,
       "blobCount": 100,
       "prefix": "bar",
       "blobSize": 1024,

@@ -68,7 +68,7 @@ impl Downloader {
     pub async fn download(&self, keys: &Vec<String>) -> Result<(), mpsc::error::SendError<String>> {
         for key in keys {
             if let Some(sender) = &self.sender {
-                let _ = sender.send(key.clone()).await?;
+                sender.send(key.clone()).await?;
                 continue;
             }
 

@@ -86,9 +86,9 @@ pub struct BasicTestOpts {
     /// The private key to use for the signer wallet
     #[arg(short, long, env = "HOKU_PRIVATE_KEY", hide_env_values = true)]
     pub key: String,
-    /// The private key to use for the funder wallet
-    #[arg(short, long, env = "HOKU_FUNDER_PRIVATE_KEY", hide_env_values = true)]
-    pub funder_private_key: String,
+    /// The private key to use for the admin wallet
+    #[arg(short, long, env = "HOKU_ADMIN_PRIVATE_KEY", hide_env_values = true)]
+    pub admin_private_key: String,
     /// The network to use (defaults to devnet)
     #[arg(short, long, env = "HOKU_NETWORK")]
     pub network: Option<Network>,
@@ -120,12 +120,10 @@ pub struct BasicTestOpts {
 impl From<BasicTestOpts> for TestConfig {
     fn from(opts: BasicTestOpts) -> Self {
         Self {
-            funder_private_key: opts.funder_private_key,
+            admin_private_key: opts.admin_private_key,
             network: opts.network.unwrap_or(Network::Devnet),
             test: TestRunConfig {
                 num_accounts: opts.num_accounts,
-                request_funds: None,
-                buy_credit: opts.buy_credits,
                 target: opts.target,
                 upload: UploadTest {
                     bucket: opts.bucket,
@@ -146,6 +144,7 @@ pub async fn run(config: TestConfig) -> Result<()> {
     let collector = Arc::new(Collector::new());
     let tests = TestRunner::prepare(config, collector.clone()).await?;
     let mut tasks = JoinSet::new();
+
     for test in tests.into_iter() {
         tasks.spawn(async move {
             match test.execute().await {
@@ -177,7 +176,12 @@ pub(crate) async fn setup_provider_wallet_bucket(
     let obj_api = network_cfg.object_api_url;
     info!("using network '{network}' and object api: {obj_api}");
 
-    let provider = JsonRpcProvider::new_http(network_cfg.rpc_url, None, Some(obj_api))?;
+    let provider = JsonRpcProvider::new_http(
+        network_cfg.rpc_url,
+        network_cfg.subnet_id.chain_id(),
+        None,
+        Some(obj_api),
+    )?;
 
     // Setup local wallet using private key from arg
     let mut wallet = Wallet::new_secp256k1(key.sk, AccountKind::Ethereum, network_cfg.subnet_id)?;
