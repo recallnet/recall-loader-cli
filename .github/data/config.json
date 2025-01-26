@@ -2,18 +2,19 @@
   "funderPrivateKey" : "01019316fb69a16e73bd51de96757d750743b2f44ebc3573116502775d01c37a",
   "network": "testnet",
   "test": {
-    "numAccounts": 5,
+    "numAccounts": 50,
     "requestFunds" : 11,
     "buyCredit": 10,
     "target": "sdk",
     "upload": {
       "bucket": null,
-      "blobCount": 1000,
+      "blobCount": 100,
       "prefix": "bar",
-      "blobSize": 102400,
-      "overwrite": true
+      "blobSize": 1024,
+      "overwrite": true,
+      "broadcastMode": "async"
     },
-    "download": true,
-    "delete": true
+    "download": null,
+    "delete": false
   }
 }

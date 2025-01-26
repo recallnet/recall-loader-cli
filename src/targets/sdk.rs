@@ -1,16 +1,15 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::config::Broadcast;
+use crate::targets::Target;
 use anyhow::Result;
 use async_trait::async_trait;
 use hoku_provider::json_rpc::JsonRpcProvider;
-use hoku_provider::tx::BroadcastMode;
 use hoku_sdk::machine::bucket::{AddOptions, Bucket, DeleteOptions, GetOptions, QueryOptions};
 use hoku_sdk::machine::Machine;
 use hoku_signer::Wallet;
 use tokio::io::AsyncWrite;
-
-use crate::targets::Target;
 
 pub struct SdkTarget {
     pub provider: JsonRpcProvider,
@@ -62,11 +61,13 @@ impl Target for SdkTarget {
         path: &Path,
         metadata: HashMap<String, String>,
         overwrite: bool,
+        broadcast_mode: Broadcast,
     ) -> Result<()> {
         let mut wallet = self.wallet.clone();
         let opts = AddOptions {
             metadata: metadata.clone(),
             overwrite,
+            broadcast_mode: broadcast_mode.into(),
             ..Default::default()
         };
         let _ = bucket
@@ -90,15 +91,9 @@ impl Target for SdkTarget {
         bucket.get(&self.provider, key, writer, opts).await
     }
 
-    async fn delete_object(
-        &self,
-        bucket: &Bucket,
-        key: &str,
-        broadcast_mode: BroadcastMode,
-    ) -> Result<()> {
+    async fn delete_object(&self, bucket: &Bucket, key: &str) -> Result<()> {
         let mut wallet = self.wallet.clone();
         let opts = DeleteOptions {
-            broadcast_mode,
             ..Default::default()
         };
         bucket
