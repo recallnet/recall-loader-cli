@@ -4,7 +4,7 @@ use std::path::Path;
 use crate::config::Broadcast;
 use anyhow::Result;
 use async_trait::async_trait;
-use hoku_sdk::machine::bucket::Bucket;
+use recall_sdk::machine::bucket::Bucket;
 use tokio::io::AsyncWrite;
 
 pub mod sdk;

@@ -15,10 +15,10 @@ use std::{
 
 use anyhow::Result;
 use clap::Args;
-use hoku_provider::{fvm_shared::address::Address, json_rpc::JsonRpcProvider};
-use hoku_sdk::machine::{bucket::Bucket, Machine};
-use hoku_sdk::network::Network;
-use hoku_signer::{AccountKind, Signer as _, Wallet};
+use recall_provider::{fvm_shared::address::Address, json_rpc::JsonRpcProvider};
+use recall_sdk::machine::{bucket::Bucket, Machine};
+use recall_sdk::network::Network;
+use recall_signer::{AccountKind, Signer as _, Wallet};
 use runner::TestRunner;
 use tokio::task::JoinSet;
 use tracing::{debug, error, info};
@@ -40,13 +40,13 @@ pub struct CleanupOpts {
     #[arg(short, long)]
     pub prefix: String,
     /// The private key to use for the signer wallet
-    #[arg(short, long, env = "HOKU_PRIVATE_KEY", hide_env_values = true)]
+    #[arg(short, long, env = "RECALL_PRIVATE_KEY", hide_env_values = true)]
     pub key: String,
     /// The network to use (defaults to devnet)
-    #[arg(short, long, env = "HOKU_NETWORK")]
+    #[arg(short, long, env = "RECALL_NETWORK")]
     pub network: Option<Network>,
     /// The bucket machine address (fvm address string)
-    #[arg(short = 'b', long, value_parser = hoku_provider::util::parse_address)]
+    #[arg(short = 'b', long, value_parser = recall_provider::util::parse_address)]
     pub bucket: Address,
     /// If the test targets the SDK or S3 client.
     #[arg(long, default_value = "sdk")]
@@ -61,13 +61,13 @@ pub struct QueryOpts {
     #[arg(short, long, default_value = "foo/")]
     pub prefix: String,
     /// The private key to use for the signer wallet
-    #[arg(short, long, env = "HOKU_PRIVATE_KEY", hide_env_values = true)]
+    #[arg(short, long, env = "RECALL_PRIVATE_KEY", hide_env_values = true)]
     pub key: String,
     /// The network to use (defaults to devnet)
-    #[arg(short, long, env = "HOKU_NETWORK")]
+    #[arg(short, long, env = "RECALL_NETWORK")]
     pub network: Option<Network>,
     /// The bucket machine address (fvm address string)
-    #[arg(short = 'b', long, value_parser = hoku_provider::util::parse_address)]
+    #[arg(short = 'b', long, value_parser = recall_provider::util::parse_address)]
     pub bucket: Address,
     /// If the test targets the SDK or S3 client.
     #[arg(long, default_value = "sdk")]
@@ -84,16 +84,16 @@ pub struct BasicTestOpts {
     #[arg(short, long, default_value = "foo")]
     pub prefix: String,
     /// The private key to use for the signer wallet
-    #[arg(short, long, env = "HOKU_PRIVATE_KEY", hide_env_values = true)]
+    #[arg(short, long, env = "RECALL_PRIVATE_KEY", hide_env_values = true)]
     pub key: String,
     /// The private key to use for the funder wallet
-    #[arg(short, long, env = "HOKU_FUNDER_PRIVATE_KEY", hide_env_values = true)]
+    #[arg(short, long, env = "RECALL_FUNDER_PRIVATE_KEY", hide_env_values = true)]
     pub funder_private_key: String,
     /// The network to use (defaults to devnet)
-    #[arg(short, long, env = "HOKU_NETWORK")]
+    #[arg(short, long, env = "RECALL_NETWORK")]
     pub network: Option<Network>,
     /// The bucket machine address (fvm address string)
-    #[arg(short = 'b', long, value_parser = hoku_provider::util::parse_address)]
+    #[arg(short = 'b', long, value_parser = recall_provider::util::parse_address)]
     pub bucket: Option<Address>,
     /// The count of credits to buy before starting (defaults to not buying any)
     #[arg(long)]

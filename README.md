@@ -1,6 +1,6 @@
-# hoku-loader
+# recall-loader
 
-A simple cli for perf/load testing with the hoku cli (buckets and blobs)
+A simple cli for perf/load testing with the recall cli (buckets and blobs)
 
 ## Storage
 
@@ -13,8 +13,8 @@ By default, blobs are uploaded to `/foo/$x` where x is the number. You can chang
 ```sh
 cargo build --release
 
-❯ ./target/release/hoku-loader -h
-Usage: hoku-loader <COMMAND>
+❯ ./target/release/recall-loader -h
+Usage: recall-loader <COMMAND>
 
 Commands:
   basic-test  Run a basic test using cli args
@@ -26,15 +26,15 @@ Options:
   -h, --help     Print help
   -V, --version  Print version
 
-❯ ./target/release/hoku-loader basic -h
+❯ ./target/release/recall-loader basic -h
 Run a basic test using cli args
 
-Usage: hoku-loader basic-test [OPTIONS] --key <KEY>
+Usage: recall-loader basic-test [OPTIONS] --key <KEY>
 
 Options:
   -p, --prefix <PREFIX>              Everything under /foo by default in bucket can use `date +"%s"` to get the unix epoch seconds for a 'random' value for the test [default: foo]
-  -k, --key <KEY>                    The private key to use for the signer wallet [env: HOKU_PRIVATE_KEY=]
-  -n, --network <NETWORK>            The network to use (defaults to devnet) [env: HOKU_NETWORK=devnet]
+  -k, --key <KEY>                    The private key to use for the signer wallet [env: RECALL_PRIVATE_KEY=]
+  -n, --network <NETWORK>            The network to use (defaults to devnet) [env: RECALL_NETWORK=devnet]
   -b, --bucket <BUCKET>              The bucket machine address (fvm address string)
       --buy-credits <BUY_CREDITS>    The count of credits to buy before starting (defaults to not buying any)
       --delete                       whether blobs should be deleted afterward
@@ -45,7 +45,7 @@ Options:
 
 ```
 
-Uses the `HOKU_NETWORK` and `HOKU_PRIVATE_KEY` variables if nothing passed to the cli. Will create a new bucket if none is specified.
+Uses the `RECALL_NETWORK` and `RECALL_PRIVATE_KEY` variables if nothing passed to the cli. Will create a new bucket if none is specified.
 
 ### Examples
 
@@ -64,16 +64,16 @@ fendermint genesis --genesis-file test-network/genesis.json add-account --public
 ```
 
 ```sh
-# create a new bucket and upload 4 100 byte blobs (requires HOKU_PRIVATE_KEY to be set, defaults to devnet)
-./target/release/hoku-loader basic -c 4 -s .1
+# create a new bucket and upload 4 100 byte blobs (requires RECALL_PRIVATE_KEY to be set, defaults to devnet)
+./target/release/recall-loader basic -c 4 -s .1
 # upload 3 1gb blobs to testnet
-./target/release/hoku-loader basic --bucket $IGNITION_BUCKET -n testnet -k $IGNITION_PRIVATE_KEY -s 1000 --blob_cnt 3
+./target/release/recall-loader basic --bucket $IGNITION_BUCKET -n testnet -k $IGNITION_PRIVATE_KEY -s 1000 --blob_cnt 3
 # upload, query and delete the blobs after uploading (defaults to 100 1mb blobs in a new bucket with /foo prefix)
-./target/release/hoku-loader basic  --delete --query
+./target/release/recall-loader basic  --delete --query
 # delete blobs from a bucket. if it fails to list the bucket due to out of gas, will not delete anything
-./target/release/hoku-loader cleanup --bucket $IGNITION_BUCKET -n testnet -k $IGNITION_PRIVATE_KEY --prefix foo/
+./target/release/recall-loader cleanup --bucket $IGNITION_BUCKET -n testnet -k $IGNITION_PRIVATE_KEY --prefix foo/
 # run a test using a config file where you can specify multiple tests in parallel
- ./target/release/hoku-loader run -p ./test-config/upload.json 
+ ./target/release/recall-loader run -p ./test-config/upload.json 
 ```
 
 ```jsonc

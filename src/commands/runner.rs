@@ -11,13 +11,13 @@ use crate::KeyData;
 use anyhow::{bail, Context as _, Result};
 use chrono::Utc;
 use ethers::types::H160;
-use hoku_provider::{fvm_shared::econ::TokenAmount, json_rpc::JsonRpcProvider};
-use hoku_sdk::{
+use recall_provider::{fvm_shared::econ::TokenAmount, json_rpc::JsonRpcProvider};
+use recall_sdk::{
     credits::{BuyOptions, Credits},
     machine::{bucket::Bucket, Machine},
 };
-use hoku_signer::key::random_secretkey;
-use hoku_signer::{AccountKind, EthAddress, Signer as _, Wallet};
+use recall_signer::key::random_secretkey;
+use recall_signer::{AccountKind, EthAddress, Signer as _, Wallet};
 use rand::{thread_rng, Rng as _};
 use std::sync::Arc;
 use std::{

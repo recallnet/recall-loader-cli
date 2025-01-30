@@ -1,4 +1,4 @@
-// Copyright 2024 Hoku Contributors
+// Copyright 2025 Recall Contributors
 // SPDX-License-Identifier: Apache-2.0, MIT
 pub mod commands;
 pub mod config;
@@ -8,8 +8,8 @@ pub mod targets;
 
 use clap::{command, Parser, Subcommand};
 use commands::{BasicTestOpts, CleanupOpts, QueryOpts, RunTestOpts};
-use hoku_signer::key::parse_secret_key;
-use hoku_signer::{key::SecretKey, EthAddress};
+use recall_signer::key::parse_secret_key;
+use recall_signer::{key::SecretKey, EthAddress};
 
 #[derive(Parser, Debug, Clone)]
 #[command(version)]

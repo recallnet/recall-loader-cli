@@ -1,6 +1,6 @@
-use hoku_provider::json_rpc::Url;
-use hoku_provider::{fvm_shared::address::Address, tx::BroadcastMode};
-use hoku_sdk::network::Network;
+use recall_provider::json_rpc::Url;
+use recall_provider::{fvm_shared::address::Address, tx::BroadcastMode};
+use recall_sdk::network::Network;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use std::str::FromStr;
@@ -33,7 +33,7 @@ where
 {
     let address: Option<&str> = serde::de::Deserialize::deserialize(deserializer)?;
     address
-        .map(hoku_provider::util::parse_address)
+        .map(recall_provider::util::parse_address)
         .transpose()
         .map_err(serde::de::Error::custom)
 }
@@ -141,8 +141,8 @@ impl RandomizedNetwork for Network {
         let urls = match self {
             Network::Mainnet => unimplemented!(),
             Network::Testnet => vec![
-                "https://api-ignition-0.hoku.sh",
-                "https://api-ignition-1.hoku.sh",
+                "https://api-ignition-0.recall.network",
+                "https://api-ignition-1.recall.network",
             ],
             Network::Localnet => vec![
                 "http://localhost:26657",
@@ -160,8 +160,8 @@ impl RandomizedNetwork for Network {
         let urls = match self {
             Network::Mainnet => unimplemented!(),
             Network::Testnet => vec![
-                "https://object-api-ignition-0.hoku.sh",
-                "https://object-api-ignition-1.hoku.sh",
+                "https://object-api-ignition-0.recall.network",
+                "https://object-api-ignition-1.recall.network",
             ],
             Network::Localnet => vec![
                 "http://localhost:8001",

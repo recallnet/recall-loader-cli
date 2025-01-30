@@ -1,5 +1,5 @@
 [package]
-name = "hoku-loader"
+name = "recall-loader"
 version = "0.1.0"
 edition = "2021"
 
@@ -17,9 +17,9 @@ clap = { version = "4.3.0", features = [
 ], default-features = false }
 ethers = { version = "2.0" }
 hex = "0.4"
-hoku_sdk = { git = "ssh://git@github.com/hokunet/rust-hoku.git", rev = "710ccd6b2ebad0734b76f781a3c434188d8b4bb7" }
-hoku_provider = { git = "ssh://git@github.com/hokunet/rust-hoku.git", rev = "710ccd6b2ebad0734b76f781a3c434188d8b4bb7" }
-hoku_signer = { git = "ssh://git@github.com/hokunet/rust-hoku.git", rev = "710ccd6b2ebad0734b76f781a3c434188d8b4bb7" }
+recall_sdk = { git = "ssh://git@github.com/recallnet/rust-recall.git", rev = "710ccd6b2ebad0734b76f781a3c434188d8b4bb7" }
+recall_provider = { git = "ssh://git@github.com/recallnet/rust-recall.git", rev = "710ccd6b2ebad0734b76f781a3c434188d8b4bb7" }
+recall_signer = { git = "ssh://git@github.com/recallnet/rust-recall.git", rev = "710ccd6b2ebad0734b76f781a3c434188d8b4bb7" }
 rand = "0.8"
 serde = "1"
 serde_json = "1"
@@ -29,7 +29,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1.85"
 chrono = "0.4.39"
 
-# [patch."ssh://git@github.com/hokunet/rust-hoku.git"]
-# hoku_sdk = {path = "../rust-hoku/sdk"}
-# hoku_provider = {path = "../rust-hoku/provider"}
-# hoku_signer = {path = "../rust-hoku/signer"}
+# [patch."ssh://git@github.com/recallnet/rust-recall.git"]
+# recall_sdk = {path = "../rust-recall/sdk"}
+# recall_provider = {path = "../rust-recall/provider"}
+# recall_signer = {path = "../rust-recall/signer"}
