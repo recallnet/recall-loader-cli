@@ -17,9 +17,9 @@ clap = { version = "4.3.0", features = [
 ], default-features = false }
 ethers = { version = "2.0" }
 hex = "0.4"
-recall_sdk = { git = "ssh://git@github.com/recallnet/rust-recall.git", rev = "4ace50bdf2d4fdfb9ac9d4df7d2897341219938a" }
-recall_provider = { git = "ssh://git@github.com/recallnet/rust-recall.git", rev = "4ace50bdf2d4fdfb9ac9d4df7d2897341219938a" }
-recall_signer = { git = "ssh://git@github.com/recallnet/rust-recall.git", rev = "4ace50bdf2d4fdfb9ac9d4df7d2897341219938a" }
+recall_sdk = { git = "ssh://git@github.com/recallnet/rust-recall.git", rev = "1cf1e17ea7ecdb4bf6c589b29b3eb20c74db6903" }
+recall_provider = { git = "ssh://git@github.com/recallnet/rust-recall.git", rev = "1cf1e17ea7ecdb4bf6c589b29b3eb20c74db6903" }
+recall_signer = { git = "ssh://git@github.com/recallnet/rust-recall.git", rev = "1cf1e17ea7ecdb4bf6c589b29b3eb20c74db6903" }
 rand = "0.8"
 serde = "1"
 serde_json = "1"
