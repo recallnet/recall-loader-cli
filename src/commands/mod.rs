@@ -23,7 +23,7 @@ use runner::TestRunner;
 use tokio::task::JoinSet;
 use tracing::{debug, error, info};
 
-use crate::config::{Broadcast, Target, TestConfig, TestRunConfig, UploadTest};
+use crate::config::{Broadcast, RandomizedNetwork, Target, TestConfig, TestRunConfig, UploadTest};
 use crate::stats::collector::Collector;
 use crate::KeyData;
 
@@ -177,7 +177,7 @@ pub(crate) async fn setup_provider_wallet_bucket(
     let obj_api = network_cfg.object_api_url;
     info!("using network '{network}' and object api: {obj_api}");
 
-    let provider = JsonRpcProvider::new_http(network_cfg.rpc_url, None, Some(obj_api))?;
+    let provider = JsonRpcProvider::new_http(network_cfg.rpc_url, network.chain_id(), None, Some(obj_api))?;
 
     // Setup local wallet using private key from arg
     let mut wallet = Wallet::new_secp256k1(key.sk, AccountKind::Ethereum, network_cfg.subnet_id)?;

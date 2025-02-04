@@ -11,7 +11,10 @@ use crate::KeyData;
 use anyhow::{bail, Context as _, Result};
 use chrono::Utc;
 use ethers::types::H160;
-use recall_provider::{fvm_shared::econ::TokenAmount, json_rpc::JsonRpcProvider};
+use recall_provider::{
+    fvm_shared::econ::TokenAmount,
+    json_rpc::JsonRpcProvider
+};
 use recall_sdk::{
     credits::{BuyOptions, Credits},
     machine::{bucket::Bucket, Machine},
@@ -118,6 +121,7 @@ impl TestRunner {
         let mut results: Vec<TestRunner> = Vec::with_capacity(config.test.num_accounts as usize);
         let provider = JsonRpcProvider::new_http(
             network.random_rpc_url(),
+            network.chain_id(),
             None,
             Some(network.random_objects_api_url()),
         )
@@ -185,7 +189,7 @@ impl TestRunner {
                 )
                 .await
                 .context("failed to buy credits")?;
-                info!(eth_addr=?key.eth_addr, f_addr=?addr, "bought credits {credits} in tx {}", tx.hash);
+                info!(eth_addr=?key.eth_addr, f_addr=?addr, "bought credits {credits} in tx {}", tx.hash());
             }
 
             let target = match config.test.target {
