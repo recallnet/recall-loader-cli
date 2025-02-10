@@ -5,10 +5,10 @@ use crate::config::Broadcast;
 use crate::targets::Target;
 use anyhow::Result;
 use async_trait::async_trait;
-use hoku_provider::json_rpc::JsonRpcProvider;
-use hoku_sdk::machine::bucket::{AddOptions, Bucket, DeleteOptions, GetOptions, QueryOptions};
-use hoku_sdk::machine::Machine;
-use hoku_signer::Wallet;
+use recall_provider::json_rpc::JsonRpcProvider;
+use recall_sdk::machine::bucket::{AddOptions, Bucket, DeleteOptions, GetOptions, QueryOptions};
+use recall_sdk::machine::Machine;
+use recall_signer::Wallet;
 use tokio::io::AsyncWrite;
 
 pub struct SdkTarget {

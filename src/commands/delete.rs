@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{bail, Context as _};
-use hoku_sdk::{machine::Machine, network::Network};
+use recall_sdk::{machine::Machine, network::Network};
 use tracing::{error, info};
 
 use super::{list_bucket_items, setup_provider_wallet_bucket, CleanupOpts};

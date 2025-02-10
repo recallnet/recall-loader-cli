@@ -11,13 +11,16 @@ use crate::KeyData;
 use anyhow::{bail, Context as _, Result};
 use chrono::Utc;
 use ethers::types::H160;
-use hoku_provider::{fvm_shared::econ::TokenAmount, json_rpc::JsonRpcProvider};
-use hoku_sdk::{
+use recall_provider::{
+    fvm_shared::econ::TokenAmount,
+    json_rpc::JsonRpcProvider
+};
+use recall_sdk::{
     credits::{BuyOptions, Credits},
     machine::{bucket::Bucket, Machine},
 };
-use hoku_signer::key::random_secretkey;
-use hoku_signer::{AccountKind, EthAddress, Signer as _, Wallet};
+use recall_signer::key::random_secretkey;
+use recall_signer::{AccountKind, EthAddress, Signer as _, Wallet};
 use rand::{thread_rng, Rng as _};
 use std::sync::Arc;
 use std::{
@@ -118,6 +121,7 @@ impl TestRunner {
         let mut results: Vec<TestRunner> = Vec::with_capacity(config.test.num_accounts as usize);
         let provider = JsonRpcProvider::new_http(
             network.random_rpc_url(),
+            network.chain_id(),
             None,
             Some(network.random_objects_api_url()),
         )
@@ -185,7 +189,7 @@ impl TestRunner {
                 )
                 .await
                 .context("failed to buy credits")?;
-                info!(eth_addr=?key.eth_addr, f_addr=?addr, "bought credits {credits} in tx {}", tx.hash);
+                info!(eth_addr=?key.eth_addr, f_addr=?addr, "bought credits {credits} in tx {}", tx.hash());
             }
 
             let target = match config.test.target {

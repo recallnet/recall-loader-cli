@@ -1,6 +1,6 @@
-use hoku_provider::json_rpc::Url;
-use hoku_provider::{fvm_shared::address::Address, tx::BroadcastMode};
-use hoku_sdk::network::Network;
+use recall_provider::json_rpc::Url;
+use recall_provider::{fvm_shared::address::Address, fvm_shared::chainid::ChainID, tx::BroadcastMode};
+use recall_sdk::network::Network;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use std::str::FromStr;
@@ -33,7 +33,7 @@ where
 {
     let address: Option<&str> = serde::de::Deserialize::deserialize(deserializer)?;
     address
-        .map(hoku_provider::util::parse_address)
+        .map(recall_provider::util::parse_address)
         .transpose()
         .map_err(serde::de::Error::custom)
 }
@@ -134,6 +134,7 @@ pub struct QueryTest {}
 pub trait RandomizedNetwork {
     fn random_rpc_url(&self) -> Url;
     fn random_objects_api_url(&self) -> Url;
+    fn chain_id(&self) -> ChainID;
 }
 
 impl RandomizedNetwork for Network {
@@ -141,8 +142,8 @@ impl RandomizedNetwork for Network {
         let urls = match self {
             Network::Mainnet => unimplemented!(),
             Network::Testnet => vec![
-                "https://api-ignition-0.hoku.sh",
-                "https://api-ignition-1.hoku.sh",
+                "https://api.node-0.testnet.recall.network",
+                "https://api.node-1.testnet.recall.network",
             ],
             Network::Localnet => vec![
                 "http://localhost:26657",
@@ -160,8 +161,8 @@ impl RandomizedNetwork for Network {
         let urls = match self {
             Network::Mainnet => unimplemented!(),
             Network::Testnet => vec![
-                "https://object-api-ignition-0.hoku.sh",
-                "https://object-api-ignition-1.hoku.sh",
+                "https://objects.node-0.testnet.recall.network",
+                "https://objects.node-1.testnet.recall.network",
             ],
             Network::Localnet => vec![
                 "http://localhost:8001",
@@ -173,5 +174,14 @@ impl RandomizedNetwork for Network {
         let mut rng = thread_rng();
         let url = urls.choose(&mut rng).unwrap();
         Url::from_str(url).unwrap()
+    }
+
+    fn chain_id(&self) -> ChainID {
+        match self {
+            Network::Mainnet => ChainID::from(24816),
+            Network::Testnet => ChainID::from(2481632),
+            Network::Localnet => ChainID::from(248163216),
+            Network::Devnet => ChainID::from(248163216),
+        }
     }
 }

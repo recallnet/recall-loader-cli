@@ -36,9 +36,9 @@ Upload a large file (1GiB) and measure how long it takes to upload and download
 run this a bunch of time to collect a bunch of data points
 
 
-BUCKET="" NEXT_KEY=$(hoku bu query -a $BUCKET -p foo/ | jq -r ".next_key"); while [ -n "$NEXT_KEY" ]; do NEXT_KEY=$(hoku bu query -a $BUCKET -p foo/ --start-key "$NEXT_KEY" | jq -r ".next_key"); done
+BUCKET="" NEXT_KEY=$(recall bu query -a $BUCKET -p foo/ | jq -r ".next_key"); while [ -n "$NEXT_KEY" ]; do NEXT_KEY=$(recall bu query -a $BUCKET -p foo/ --start-key "$NEXT_KEY" | jq -r ".next_key"); done
 
-❯ hoku bu query -a t2ys422ikwiomp7dga6dmixlh2ghdgzrbc3fe4v7i
+❯ recall bu query -a t2ys422ikwiomp7dga6dmixlh2ghdgzrbc3fe4v7i
 {
   "objects": [],
   "common_prefixes": [
